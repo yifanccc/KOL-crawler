@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+
+.superpowers/
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+
+*.log
+*.sqlite
+*.db
