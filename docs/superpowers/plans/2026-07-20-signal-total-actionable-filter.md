@@ -8,6 +8,8 @@
 
 **Tech Stack:** FastAPI, SQLAlchemy 2, pytest, Next.js 15, React 19, TypeScript, Node test runner, existing Graphite/Cyan CSS.
 
+**Status:** Completed and deployed on 2026-07-20. Production verification: 124 total signals, 100 on the first page, 24 on the second page, and 32 actionable signals.
+
 ## Global Constraints
 
 - Keep the existing `items` response field and existing query parameter meanings.
@@ -28,7 +30,7 @@
 - Consumes: authenticated `GET /api/signals`.
 - Produces: regression expectations for `total`, `overallTotal`, `actionableTotal`, `limit`, `offset`, and `actionable=true`.
 
-- [ ] **Step 1: Add a reusable 105-signal fixture helper**
+- [x] **Step 1: Add a reusable 105-signal fixture helper**
 
 Add imports for `timedelta`, then add:
 
@@ -56,7 +58,7 @@ def seed_paginated_signals() -> None:
             )
 ```
 
-- [ ] **Step 2: Write three failing endpoint tests**
+- [x] **Step 2: Write three failing endpoint tests**
 
 ```python
 def test_signals_endpoint_returns_true_totals_and_pagination() -> None:
@@ -105,7 +107,7 @@ def test_signals_endpoint_validates_pagination_bounds() -> None:
     assert [response.status_code for response in responses] == [422, 422, 422]
 ```
 
-- [ ] **Step 3: Run the targeted tests and verify RED**
+- [x] **Step 3: Run the targeted tests and verify RED**
 
 Run:
 
@@ -128,7 +130,7 @@ Expected: failures because metadata is absent, the old actionable filter cannot 
 - Consumes: `kol_id`, `asset`/`symbol`, `tag`, `stance`, `actionable`, `platform`, `time_range`, `min_importance`, `limit`, `offset`.
 - Produces: `{items, total, overallTotal, actionableTotal, limit, offset}`.
 
-- [ ] **Step 1: Add boundary types and query helpers**
+- [x] **Step 1: Add boundary types and query helpers**
 
 Import `timedelta`, `Literal`, `Query`, `exists`, `func`, and `Subscription`. Define:
 
@@ -201,7 +203,7 @@ def _filtered_signals_query(
     return query
 ```
 
-- [ ] **Step 2: Replace post-fetch filtering with SQL filtering**
+- [x] **Step 2: Replace post-fetch filtering with SQL filtering**
 
 Extend `list_signals()` with:
 
@@ -242,7 +244,7 @@ return {
 
 Delete the old in-memory KOL, asset, stance, actionable, and tag filters.
 
-- [ ] **Step 3: Run targeted and full backend verification**
+- [x] **Step 3: Run targeted and full backend verification**
 
 Run:
 
@@ -267,7 +269,7 @@ Expected: all tests pass.
 - Produces: `SignalQuery`, `SignalPage`, `buildSignalQuery()`, and `fetchSignalPage()`.
 - Preserves: `fetchSignals(params): Promise<Signal[]>`.
 
-- [ ] **Step 1: Write the failing frontend contract test**
+- [x] **Step 1: Write the failing frontend contract test**
 
 Create:
 
@@ -297,7 +299,7 @@ test("signal query serializes filters and pagination", () => {
 });
 ```
 
-- [ ] **Step 2: Run the Node test and verify RED**
+- [x] **Step 2: Run the Node test and verify RED**
 
 Run:
 
@@ -308,7 +310,7 @@ node --test tests/signalPage.test.mjs
 
 Expected: FAIL because `buildSignalQuery` does not exist.
 
-- [ ] **Step 3: Define additive types**
+- [x] **Step 3: Define additive types**
 
 In `frontend/src/lib/types.ts`, add:
 
@@ -336,7 +338,7 @@ export interface SignalPage {
 }
 ```
 
-- [ ] **Step 4: Implement serialization and compatibility**
+- [x] **Step 4: Implement serialization and compatibility**
 
 Export `buildSignalQuery(params: SignalQuery = {}): string`, adding parameters in the exact order asserted by the test. Add:
 
@@ -363,7 +365,7 @@ export async function fetchSignals(params: SignalQuery = {}): Promise<Signal[]> 
 }
 ```
 
-- [ ] **Step 5: Run the frontend contract test and type checker**
+- [x] **Step 5: Run the frontend contract test and type checker**
 
 Run:
 
@@ -388,7 +390,7 @@ Expected: all Node tests pass and TypeScript exits 0.
 - Produces: `DashboardFilters`, `defaultDashboardFilters`, `toggleActionableOnly()`.
 - Consumes: the same filter object from the homepage and FilterBar.
 
-- [ ] **Step 1: Write a failing state test**
+- [x] **Step 1: Write a failing state test**
 
 ```javascript
 import assert from "node:assert/strict";
@@ -404,7 +406,7 @@ test("actionable filter toggles and resets", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -415,7 +417,7 @@ node --test tests/dashboardFilters.test.mjs
 
 Expected: FAIL because `dashboardFilters.ts` does not exist.
 
-- [ ] **Step 3: Implement the filter state module**
+- [x] **Step 3: Implement the filter state module**
 
 Move the existing filter type/default values into `frontend/src/lib/dashboardFilters.ts` and add:
 
@@ -425,7 +427,7 @@ export function toggleActionableOnly(filters: DashboardFilters): DashboardFilter
 }
 ```
 
-- [ ] **Step 4: Add the FilterBar control**
+- [x] **Step 4: Add the FilterBar control**
 
 Import `DashboardFilters` from `@/lib/dashboardFilters`, remove the local interface, and add:
 
@@ -444,7 +446,7 @@ Import `DashboardFilters` from `@/lib/dashboardFilters`, remove the local interf
 </label>
 ```
 
-- [ ] **Step 5: Run the state test and type checker**
+- [x] **Step 5: Run the state test and type checker**
 
 Run:
 
@@ -469,7 +471,7 @@ Expected: all pass.
 - Consumes: `SignalPage`, `DashboardFilters`, `toggleActionableOnly()`.
 - Produces: synchronized actionable select/card, exact totals, and previous/next pagination.
 
-- [ ] **Step 1: Make StatCard optionally interactive**
+- [x] **Step 1: Make StatCard optionally interactive**
 
 Add optional `active` and `onClick` props. Render a native button only when `onClick` exists:
 
@@ -491,7 +493,7 @@ return onClick ? (
 );
 ```
 
-- [ ] **Step 2: Replace client-only result counting with SignalPage metadata**
+- [x] **Step 2: Replace client-only result counting with SignalPage metadata**
 
 In the homepage:
 
@@ -521,7 +523,7 @@ Use:
 />
 ```
 
-- [ ] **Step 3: Add pagination controls**
+- [x] **Step 3: Add pagination controls**
 
 Show `0 / 0` for no matches, otherwise `${offset + 1}-${offset + items.length} / ${total}`. Add two icon buttons with explicit labels:
 
@@ -539,7 +541,7 @@ Show `0 / 0` for no matches, otherwise `${offset + 1}-${offset + items.length} /
 </button>
 ```
 
-- [ ] **Step 4: Add style-consistent interaction states**
+- [x] **Step 4: Add style-consistent interaction states**
 
 Add CSS using existing tokens:
 
@@ -568,7 +570,7 @@ button.stat-card {
 
 Style pagination buttons with the existing panel, line, radius, hover, focus, and disabled tokens. Do not introduce new colors or radii.
 
-- [ ] **Step 5: Run frontend tests and production build**
+- [x] **Step 5: Run frontend tests and production build**
 
 Run:
 
@@ -591,14 +593,14 @@ Expected: all tests pass, type checking exits 0, and Next build succeeds.
 **Interfaces:**
 - Verifies: backend response, local browser interaction, responsive layout, and production deployment readiness.
 
-- [ ] **Step 1: Run full repository tests**
+- [x] **Step 1: Run full repository tests**
 
 ```bash
 cd backend && pytest -q
 cd ../frontend && node --test tests/*.test.mjs && npx tsc --noEmit && npm run build
 ```
 
-- [ ] **Step 2: Run local authenticated API checks**
+- [x] **Step 2: Run local authenticated API checks**
 
 Verify a database with more than 100 rows returns:
 
@@ -607,7 +609,7 @@ Verify a database with more than 100 rows returns:
 - `actionable=true` returns only actionable items
 - invalid `limit`/`offset` returns 422
 
-- [ ] **Step 3: Inspect the homepage in a real browser**
+- [x] **Step 3: Inspect the homepage in a real browser**
 
 At desktop and narrow mobile widths:
 
@@ -618,7 +620,7 @@ At desktop and narrow mobile widths:
 - Confirm pagination moves to the next page and preserves published-time ordering.
 - Confirm no console errors, overflow, or visual mismatch.
 
-- [ ] **Step 4: Review the exact worktree diff**
+- [x] **Step 4: Review the exact worktree diff**
 
 Run:
 
@@ -629,6 +631,6 @@ git status --short
 
 Confirm only the files named in this plan were modified by this task. Do not stage the pre-existing untracked application tree.
 
-- [ ] **Step 5: Deploy only within the established production workflow**
+- [x] **Step 5: Deploy only within the established production workflow**
 
 If production deployment remains authorized in the active conversation, sync only the changed source files to `/home/deploy/kol-crawler`, build with `deploy/docker-compose.prod.yml` and Tencent PyPI mirror, recreate only `api` and `web`, then re-run authenticated external API and browser checks. Otherwise stop after local verification and report the exact deploy commands.

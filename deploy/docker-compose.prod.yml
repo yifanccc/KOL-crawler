@@ -1,0 +1,79 @@
+name: kol-crawler
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.cloud.tencent.com/pypi/simple}
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+      REDIS_URL: redis://redis:6379/0
+      BOOTSTRAP_FILE: /app/app/data/bootstrap_posts.json
+      WEB_ORIGIN: http://www.yifanlab.cloud
+      COOKIE_SECURE: "false"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL_API_STYLE: ${MODEL_API_STYLE:-chat_completions}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-pro}
+      MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-high}
+      ENABLE_SCHEDULER: "false"
+      STARTUP_BACKFILL_ENABLED: "false"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${KOL_API_PORT:-18010}:8000"
+
+  web:
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://www.yifanlab.cloud/kol
+        NEXT_PUBLIC_BASE_PATH: /kol
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://www.yifanlab.cloud/kol
+      NEXT_PUBLIC_BASE_PATH: /kol
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-kol_session}
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:${KOL_WEB_PORT:-13010}:3000"
+
+volumes:
+  mysql_data:
+  redis_data:

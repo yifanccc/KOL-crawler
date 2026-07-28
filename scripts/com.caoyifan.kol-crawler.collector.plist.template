@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.caoyifan.kol-crawler.collector</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__ROOT__/scripts/collector-launchd-run.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__ROOT__/collector</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>COLLECTOR_PYTHON</key>
+    <string>__PYTHON__</string>
+    <key>PATH</key>
+    <string>__PATH__</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+__PROXY_ENV__
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__ROOT__/.runtime/collector.log</string>
+  <key>StandardErrorPath</key>
+  <string>__ROOT__/.runtime/collector.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>

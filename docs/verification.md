@@ -1,0 +1,208 @@
+# Verification
+
+执行日期：2026-07-13 至 2026-07-14。验收使用当前本机私有配置；本文件不记录任何明文密码、API key、hash、ntfy topic 或 token。
+
+## 自动化验证
+
+后端在项目 Python 3.12 API 镜像内执行，宿主 Python 3.13 未安装 `bcrypt`/`python-jose`，不作为项目运行环境：
+
+```bash
+docker compose run --rm --no-deps \
+  -e DEEPSEEK_API_KEY= \
+  -e OPENAI_API_KEY= \
+  -v "$PWD/backend/app:/app/app:ro" \
+  -v "$PWD/backend/tests:/app/tests:ro" \
+  api sh -lc 'pip install --no-cache-dir pytest pytest-mock respx && pytest -q'
+```
+
+结果：54 passed，1 条 Starlette TestClient 弃用警告。
+
+```bash
+(cd collector && python -m pytest -q)
+(cd frontend && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/refreshPolicy.test.mjs)
+(cd frontend && npm run build)
+docker compose config --quiet
+python -m compileall -q backend/app collector/collector_agent
+bash -n scripts/*.sh scripts/tests/*.sh
+bash scripts/tests/test-collector-launchd.sh
+```
+
+结果：Collector 19 passed；前端刷新策略 3 passed；LaunchAgent 安装/卸载测试通过；Next.js 15.5.20 生产构建成功，生成 `/`、`/login`、`/admin`、`/kols`、`/assets` 等 8 个路由；Compose 配置、Python 编译与 Shell 语法检查成功。新增后端并发测试的 RED 延迟为 0.2016 秒，使用工作线程后的 GREEN 延迟为 0.0105 秒。
+
+`npm audit --omit=dev`：2 moderate，0 high，0 critical。没有在本任务中做破坏性依赖升级。
+
+## Docker 与认证
+
+```bash
+docker compose up --build -d
+docker compose ps
+curl -fsS http://localhost:8010/health
+```
+
+MySQL、Redis、API、Web 均启动；本地验收地址为 Web `http://localhost:3010`、API `http://localhost:8010`。HTTP 结果：login 200、session 200、signals 200、logout 200、logout 后 signals 401。管理员 Cookie 不能调用 Collector API，Collector Bearer token 不能调用 Dashboard API，该边界同时由后端测试覆盖。
+
+## OpenCLI 与本地 Collector
+
+```bash
+opencli twitter --help
+opencli twitter tweets aleabitoreddit --limit 1 --format json
+./scripts/collector-launchd-install.sh
+./scripts/collector-status.sh
+./scripts/collector-logs.sh --lines 20
+./scripts/collector-stop.sh
+```
+
+OpenCLI v1.8.5 的 `tweets` 命令成功返回真实 JSON；Provider 解析结果为 1 条、`authenticated`，正确识别 handle、显示名和 UTC 时间。真实 LaunchAgent `com.caoyifan.kol-crawler.collector` 已安装到当前用户，`RunAtLoad`/`KeepAlive` 生效，status 为 `running <pid> (launchd)`；plist 中的 PATH 包含 NVM OpenCLI 目录。
+
+真实一轮 Collector 联动更新 heartbeat，服务端结果为 agent `home-mac-01`、overall `healthy`、X `authenticated`、Binance `healthy`、Outbox 0。网络失败、上传退避、provider 隔离、登录失败不推进 checkpoint、冷却与恢复告警由 Collector 测试覆盖。
+
+### 历史清理与单条初始化
+
+执行 `./scripts/reset-signal-history.sh --yes` 前，清理计数为 RawPost 70、Signal 70、SignalAsset 142、SignalTag 31、Asset 64、CrawlRun 603、CollectorAgent 1；KOL、Subscription、NotificationRule、ModelConfig 和自定义提示词不在删除范围。
+
+关闭 API 旧回填（`STARTUP_BACKFILL_ENABLED=false`）并修正 launchd PATH 后，真实干净初始化结果为：2 个启用订阅、RawPost 2、Signal 2；X `aleabitoreddit` 与 Binance `btc7873` 各 1 条 RawPost 和 1 条 Signal，两个 Signal 的 `structured_status` 均为 `ok`。两个订阅仍为 `custom-v1`，system/user prompt 长度分别保持 436/40。
+
+ntfy server 已配置为 `https://ntfy.sh`，私有 topic 未写入输出。初始化过程中产生 1 条自然命中规则的 NotificationEvent，状态为 `sent` 且无错误。信号正文由测试精确锁定为中文摘要、标的、方向三行；Collector 与 API 均改用 ntfy JSON 发布，中文标题不再进入 HTTP Header。
+
+2026-07-13 追加验证：标题调整为 `平台 | KOL昵称 | 原帖北京时间`。测试覆盖 X 平台映射、UTC 到 `Asia/Shanghai` 转换、昵称优先，以及昵称缺失时显示 `未知 KOL` 且绝不回退账号 handle；正文三行保持不变。
+
+## 端到端数据
+
+后端 `test_collector_e2e.py` 覆盖英文 X、中文、Binance、无标的和畸形模型五类 fixture。重复上传验证为 5 个 RawPost、5 个 Signal，SignalAsset/SignalTag/NotificationEvent 均不重复；无标的结果安全完成，畸形模型使用中文 fallback。
+
+Docker 栈另上传 `qa-btc-spx-20260711`，结果从 `accepted` 进入 `completed`，Signal 保存 `BTC`/`SPX`，资产关系为 BTC/CRYPTO 与 SPX/US_STOCK。Dashboard 顶部 BTC 搜索提交后从 11 items 过滤到 1 item；点击同卡片 SPX 徽章后仍为 1 item，搜索值同步为 SPX。
+
+## 浏览器 QA
+
+真实浏览器验证了：未登录访问受保护路由跳转 `/login?next=%2F`；登录后 Dashboard 加载；Admin 显示订阅、有效 prompt/schema 与 Collector provider 状态；KOL 页面显示采集器状态；logout 后 API 返回 401；页面控制台无 error/warning。
+
+| 视口 | scrollWidth/clientWidth | 横向溢出 | 主栏/侧栏重叠面积 | 可交互控件 | 零尺寸控件 | 结果 |
+|---|---:|---|---:|---:|---:|---|
+| 1440×900 | 1440/1440 | 否 | 0 | 111 | 0 | 通过 |
+| 1280×800 | 1280/1280 | 否 | 0 | 111 | 0 | 通过 |
+| 390×844 | 390/390 | 否 | 0 | 111 | 0 | 通过；无不可滚动的裁切控件 |
+
+浏览器验收过程中修复了两个真实缺陷：顶部搜索增加明确、可访问的提交按钮；Collector heartbeat 无时区值统一按 UTC 输出 `Z`，避免上海时区 UI 错显为 8 小时前。
+
+### 交互样式一致性回归
+
+对 `/`、`/kols`、`/assets`、`/kols/1`、`/assets/BTC`、`/admin` 逐页扫描按钮、输入框、选择框和文本域。修复前，右上角退出按钮以及 Admin 的新建订阅、订阅列表、配置输入框、prompt 编辑器和保存按钮仍使用浏览器原生样式；登录页的新表单类也没有对应样式。
+
+修复后，上述控件统一使用现有 Graphite/Cyan 颜色、`6px` 低圆角、细边框与既有 primary/ghost 层级。1440×900、1024×768、390×844 三档运行时扫描均为：原生样式控件 0、横向溢出 0。顶部搜索输入 `nvda` 并点击提交后，搜索值与标的筛选同步为 `NVDA`，情报流收敛为 7 items；控制台 error/warning 为 0。
+
+本轮已恢复应用内浏览器截图验证，并确认 Dashboard 顶部搜索、Admin 设置页、Collector 状态、订阅列表、表单与市场选择控件的视觉层级一致。
+
+## `www.yifanlab.cloud/kol` 生产验收
+
+2026-07-13 将独立生产 Compose 部署到 `/home/deploy/kol-crawler`。Web/API 分别只监听 `127.0.0.1:13010` 与 `127.0.0.1:18010`；MySQL、Redis 没有宿主机发布端口。Nginx 只在现有 `yifanlab.cloud` server 中 include `/etc/nginx/snippets/kol-crawler.conf`，安装前备份为：
+
+```text
+/etc/nginx/sites-available/yifanlab.cloud.before-kol-20260713174834
+```
+
+安装脚本的 `nginx -t` 与 reload 成功。公网烟测结果：
+
+| 地址 | 结果 |
+|---|---|
+| `http://www.yifanlab.cloud/` | 200，原站点保持可用 |
+| `http://www.yifanlab.cloud/vibe-trading/` | 200，原子路径保持可用 |
+| `http://www.yifanlab.cloud/kol` | 307 到 `/kol/login?next=%2F` |
+| `http://www.yifanlab.cloud/kol/login` | 200 |
+| `/kol/_next/static/...js` | 200 |
+| 未认证 `/kol/api/signals` | 401 |
+| 携带现有 Collector token 的 `/kol/api/v1/collector/config` | 200，7 个未删除订阅且 agent ID 匹配 |
+
+API 日志记录了成功登录 200，随后 signals/kols/assets 均为 200；本轮自动化浏览器连接在导航阶段超时，因此没有把 curl/API 日志替代为 DOM、截图或控制台结论。后续证书上线后应重新做一次隔离浏览器 QA。
+
+本地 Collector 已切换到 `PUBLIC_API_URL=http://www.yifanlab.cloud/kol`。真实 restart 后，远端 heartbeat 从 `2026-07-13 09:55:22` 推进到 `09:57:27`（服务器时间），overall `healthy`、Outbox 0；provider 为 X `authenticated`、Binance Square `healthy`。切换时暴露并修复了 launchd teardown 竞态：`collector-stop.sh` 现在等待 job 确认卸载，模拟测试已锁定立即 `stop → start` 的行为。
+
+生产验收后重新执行：后端 54 passed（1 条既有 Starlette 弃用警告）、Collector 22 passed、前端刷新策略 3 passed、launchd 脚本测试通过、生产部署契约通过、`NEXT_PUBLIC_BASE_PATH=/kol` 的 Next.js 生产构建通过。
+
+### 10 分钟调度与非阻断刷新回归
+
+2026-07-14 追加生产验收：
+
+- `GET /api/admin/config-options` 返回 `defaultIntervalMinutes=10`，默认 System/User prompt 与 2026-07-13 Serenity 固定快照一致。
+- 生产 7 个未删除订阅的 `intervalMinutes` 均为 10；只更新了调度间隔，没有修改 checkpoint、历史帖子、信号或各订阅现有提示词。
+- 本机 `collector/.env` 为 `CONFIG_POLL_SECONDS=600`，launchd 状态为 running。重启后的首轮在 `2026-07-13T15:51:51Z` 完成，下一轮在 `2026-07-13T16:04:11Z` 开始，两轮 7 个订阅均为 `status=success fetched=0`。Collector 是“每轮执行完再等待 600 秒”，因此两轮日志时间差还包含上一轮约 2 分钟的实际抓取耗时，不是整点 cron。
+- 远端 heartbeat 为 `healthy`，X 为 `authenticated`、Binance Square 为 `healthy`、Outbox 为 0。
+- 页面不可用有两层根因：首页和共享数据 Hook 每 60 秒刷新时重新设置全屏 Loading；API 分析循环又在事件循环内同步调用模型。现在仅首次加载阻断，后续刷新失败保留最后一次成功内容；分析批次通过工作线程执行，模型请求期间 API 仍可响应。60 秒读取周期不变。
+- 更新后的 Web/API 已在服务器通过 production Compose 在线构建并分别重建；MySQL、Redis 和 Nginx 未重启。根站点返回 200，`/kol` 未登录时 307 到登录页，登录页 200。
+- 独立浏览器会话没有管理员登录态，因此本轮浏览器烟测覆盖未认证跳转和登录页：文档加载完成、无横向溢出、控制台无 error/warning。认证后的 60 秒刷新行为由 3 个刷新策略测试、TypeScript/Next.js production build 和生产 API 连续 200 日志共同验证；后续人工已登录浏览器可按运维文档再观察一轮。
+- 第三轮 Collector 在 `2026-07-13T16:16:39Z` 抓到 1 条新帖；旧 API 的 heartbeat 随后 `ConnectTimeout`，但本地 Outbox 为 0，远端 RawPost 139 已完成并生成 Signal 82，数据没有丢失。发布并发修复后，`2026-07-13T16:29:31Z` 下一轮 7 个订阅全部成功，heartbeat 更新到 `2026-07-13T16:29:32Z`。
+- 生产 `OPENAI_MODEL` 于北京时间 2026-07-14 00:32 快速切换为 `gpt-5.6-terra`，配置备份为 `.env.before-openai-model-20260714003213`。该操作未 build 镜像，只强制重建 API；容器内 `get_settings().openai_model`、健康检查和最小严格 JSON Schema Responses 请求均验证通过。
+
+### 双模型协议回归
+
+每次修改模型客户端或部署配置后执行：
+
+```bash
+cd backend
+python -m pytest -q tests/test_config.py tests/test_structurer.py
+```
+
+回归必须覆盖：默认使用 DeepSeek `chat_completions`，同时继续接受 `responses`/`chat_completions`；官方 DeepSeek 地址只选用 `DEEPSEEK_API_KEY`，其他兼容地址继续选用并保留 `OPENAI_API_KEY`；Responses 模式继续发送严格 JSON Schema；Chat Completions 模式请求 `/chat/completions`、发送 `response_format={"type":"json_object"}` 并把 Schema 放入 System prompt；客户端返回内容仍通过统一的 Pydantic 结构校验和 fallback 边界。真实 API key 不进入自动化测试或仓库，生产切换后另按部署文档执行容器内烟测。
+
+2026-07-15 本地实现验收：模型配置与客户端定向测试 `19 passed`；依赖完整的隔离 API 容器中后端全量测试 `59 passed`（1 条既有 Starlette 弃用警告）；Python 编译、开发/生产 Compose 配置解析及生产部署契约均通过。本次没有使用或写入 DeepSeek key，也没有切换生产模型。
+
+### Collector 停机补抓上限
+
+2026-07-14 将已有 checkpoint 后的增量抓取从硬编码 50 改为可配置 `CATCHUP_FETCH_LIMIT=5`。测试覆盖默认值 5、环境变量覆盖与最小值 1、进程重启后复用 SQLite checkpoint、Scheduler 使用首次 1/补抓 5，以及 X 上游超额返回时只保留最新 5 条。Binance Square 原有实现已经在 provider 边界执行相同的最近 limit 条截断。
+
+补抓批次按旧到新原子写入 Outbox 并推进到最新 checkpoint；若 checkpoint 后超过 5 条，更老的超额部分按用户确认的方案 A 永久跳过。上传失败仍由现有 Outbox 退避重试保障，不会重复依赖 provider 补抓。
+
+本机 `collector/.env` 写入 `CATCHUP_FETCH_LIMIT=5` 后真实重启 launchd Collector。北京时间 2026-07-14 23:19:19 的首轮 7 个订阅全部 `status=success`、失败 0，本地 Outbox 0；远端 heartbeat 同步更新，overall healthy、X authenticated、Binance Square healthy。
+
+### 真实总数、执行性筛选与分页
+
+2026-07-20 排查确认生产数据库有 124 条 Signal，但旧 `GET /api/signals` 只返回默认窗口中的 100 个 `items`，且不返回总数元数据；首页因此把 `signals.length` 错当成“总样本数”。修复后接口新增向后兼容的 `total`、`overallTotal`、`actionableTotal`、`limit`、`offset`，并把 KOL、平台、方向、执行性、标的、标签、时间、重要性过滤全部移到数据库分页之前。排序继续使用原帖 `published_at DESC, Signal.id DESC`。
+
+自动化验收结果：
+
+- API 镜像内后端全量测试 63 passed，1 条既有 Starlette TestClient 弃用警告；新增用例覆盖 105 条分页、旧窗口之外的可执行信号、平台/24 小时/重要性组合过滤和非法分页边界。
+- 前端 Node 测试 6 passed，TypeScript `--noEmit` 通过，Next.js 15.5.20 生产构建成功；首页路由首包 6.29 kB。
+- Collector 变更前的全量测试 22 passed；Compose 本地/生产配置、生产部署契约、Python 编译、Shell 语法与 `git diff --check` 均通过。
+
+本地真实浏览器验证了筛选栏“全部 / 仅可执行”和“可执行”统计卡双向同步：启用后 `aria-pressed=true`、列表从 2 条收敛为 1 条，点击统计卡可恢复全部结果。桌面 1280 px 和移动端 390 px 均无横向溢出、溢出控件为 0，控制台 error/warning 为 0；新增控件继续使用 Graphite/Cyan 面板、绿色可执行语义和既有低圆角。
+
+生产只同步本次 8 个运行时代码文件，发布前备份位于：
+
+```text
+/home/deploy/kol-crawler/.runtime/deploy-backups/signal-total-filter-20260720225618
+```
+
+API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确使用腾讯云 PyPI 镜像；只强制重建 `api`、`web`，MySQL、Redis、Nginx、`.env` 和本机 Collector 均未重启。生产认证烟测结果：
+
+| 检查 | 结果 |
+|---|---|
+| 首批 `items` / `total` / `overallTotal` | 100 / 124 / 124 |
+| `offset=100` 第二页 | 24 条 |
+| `actionableTotal` | 32 |
+| `actionable=true` | 返回 32 条且全部 `actionable=true` |
+| `limit=101` | 422 |
+| 合并两页 `publishedAt` | 全部 124 条保持倒序 |
+| 公网 `/kol/api/signals` | 200，`overallTotal=124` |
+| 公网认证首页 | 200，包含“执行性 / 上一页 / 下一页”新 UI |
+| 根站点、`/vibe-trading/`、`/kol/login` | 均为 200 |
+| 未登录 `/kol` | 307 到 `/kol/login?next=%2F` |
+| API/Web 最近日志 | 无 ERROR、Traceback、Exception |
+
+### Collector provider 失败日志语义
+
+同日发布后健康核对暴露出旧日志语义缺陷：OpenCLI 超时时，X provider 会返回空列表并把自身健康状态设为 `failed`；Scheduler 过去只按“没有抛异常”写成 `status=success fetched=0`。先增加复现测试确认 RED，再在写 checkpoint 前检查 provider 健康状态；`failed`/`login_required` 现在写为 `status=failed error=ProviderHealth provider_status=<状态>`，不写 checkpoint、不加入成功列表，最终 Collector 全量测试为 23 passed。
+
+重启本机 launchd 后，北京时间 2026-07-20 23:02 开始的真实一轮准确区分了成功与失败：5 个订阅成功，Binance `btc7873` 和 X `Jukanlosreve` 各 1 个订阅失败；旧实现会把这两条都误记为成功。该轮 Outbox 为 0，没有丢失待上传数据。
+
+继续按相同输入对比运行环境后确认了两类独立问题：
+
+- Binance 在普通进程约 15 秒成功，但在 macOS `taskpolicy -b` 下稳定于约 2 分钟后失败；launchd 模板原有 `ProcessType=Background` 与该行为一致。删除该键、保留 `RunAtLoad`/`KeepAlive` 后，真实 launchd 中 Binance 恢复 `status=success fetched=0`。
+- 当前终端的 OpenCLI 使用代理环境，而旧 plist 只固化 PATH；`TJ_Research` 在终端约 30 秒成功，在缺少代理的 launchd 中会 60 秒超时。安装脚本现在把安装时已有的 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 经过 XML 转义写入权限为 600 的 plist，测试使用假代理值验证，真实验收只检查键存在、不输出值。
+
+北京时间 2026-07-20 23:28 的最终真实轮次中，Binance 与 5 个有效 X 订阅成功；`Jukanlosreve` 仍失败，独立 OpenCLI 命令明确返回 `Could not resolve @Jukanlosreve`，属于该订阅账号不可解析，未自动删除或推进 checkpoint。最终远端 heartbeat 为 overall `healthy`、Binance `healthy`、X `authenticated`、Outbox 0，launchd 进程持续运行。
+
+## 外部前置条件
+
+- ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。
+- X 首次登录必须在采集机人工执行；本次机器登录态有效并已完成真实读取。
+- 前端生产依赖仍有 2 个 moderate npm audit 项，升级前应逐项审阅 changelog 与锁文件变化。
+- 当前用户明确选择暂不配置证书，公网登录 Cookie 与 Collector token 仍通过 HTTP 明文传输；这是已知的临时安全缺口，不代表 HTTPS 验收通过。

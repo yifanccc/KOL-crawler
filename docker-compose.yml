@@ -1,0 +1,92 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-kol_root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-kol_signal}
+      MYSQL_USER: ${MYSQL_USER:-kol}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-kol_password}
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-kol_root_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://kol:kol_password@mysql:3306/kol_signal}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      BOOTSTRAP_FILE: /app/app/data/bootstrap_posts.json
+      X_TARGET_HANDLE: ${X_TARGET_HANDLE:-aleabitoreddit}
+      BACKFILL_LIMIT: ${BACKFILL_LIMIT:-10}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?set ADMIN_PASSWORD_HASH}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-kol_session}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      COLLECTOR_AGENT_ID: ${COLLECTOR_AGENT_ID:?set COLLECTOR_AGENT_ID}
+      COLLECTOR_TOKEN_HASH: ${COLLECTOR_TOKEN_HASH:?set COLLECTOR_TOKEN_HASH}
+      COLLECTOR_POLL_SECONDS: ${COLLECTOR_POLL_SECONDS:-60}
+      ANALYSIS_POLL_SECONDS: ${ANALYSIS_POLL_SECONDS:-10}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL_API_STYLE: ${MODEL_API_STYLE:-chat_completions}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-pro}
+      MODEL_REASONING_EFFORT: ${MODEL_REASONING_EFFORT:-high}
+      MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-180}
+      NTFY_SERVER: ${NTFY_SERVER:-}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-false}
+      SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-60}
+      STARTUP_BACKFILL_ENABLED: ${STARTUP_BACKFILL_ENABLED:-false}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:${API_PORT:-8000}}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:${API_PORT:-8000}}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-kol_session}
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  mysql_data:
+  redis_data:
