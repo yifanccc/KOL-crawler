@@ -77,8 +77,7 @@ Local Collector Scheduler
   ProviderTarget -> okx_orbit / binance_copy provider
                     |
                     v
-Validated Source Records
-  -> normalized trade_events (local SQLite)
+Provider-validated normalized trade_events
   -> deterministic position inference (local SQLite)
   -> CollectedPost + sanitized rawPayload
                     |
@@ -174,17 +173,17 @@ PostFetchResult
   posts: list[CollectedPost]
   candidate_checkpoint: string | null
 
-TradeRecordFetchResult
-  kind: trade_records
-  records: list[ValidatedSourceRecord]
+TradeEventFetchResult
+  kind: trade_events
+  events: list[TradeEvent]
   candidate_checkpoint: string | null
 ```
 
-现有 X/Binance Square provider 返回 `PostFetchResult`，只使用 `target.handle`；新 provider 返回 `TradeRecordFetchResult`，必须使用 `target.account_id`。Scheduler 先检查 Provider Health，再把帖子交给现有 `record_fetch`，或把交易记录交给独立 `trade_reconciler` 和 `record_trade_fetch`。所有第三方响应在 provider 边界完成 schema 校验，两个 result 分支不能同时携带数据。
+现有 X/Binance Square provider 返回 `PostFetchResult`，只使用 `target.handle`；新 provider 必须使用 `target.account_id`，在 provider 边界完成第三方响应 schema 校验与来源字段映射，并返回 `TradeEventFetchResult`。Scheduler 先检查 Provider Health，再把帖子交给现有 `record_fetch`，或把规范化事件交给独立 `trade_reconciler` 和 `record_trade_fetch`。两个 result 分支不能同时携带数据。
 
 ## 7. 标准化交易事件
 
-Provider 返回来源记录后，Collector 转换为统一的 `TradeEvent`：
+Provider 校验并映射来源记录，向 Collector 返回统一的 `TradeEvent`：
 
 ```text
 schema_version: 1
