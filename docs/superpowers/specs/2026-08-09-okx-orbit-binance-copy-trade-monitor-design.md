@@ -77,8 +77,8 @@ Local Collector Scheduler
   ProviderTarget -> okx_orbit / binance_copy provider
                     |
                     v
-Provider-validated normalized trade_events
-  -> deterministic position inference (local SQLite)
+Provider-validated normalized trade records
+  -> deterministic position inference and trade_events (local SQLite)
   -> CollectedPost + sanitized rawPayload
                     |
                     v
@@ -173,25 +173,27 @@ PostFetchResult
   posts: list[CollectedPost]
   candidate_checkpoint: string | null
 
-TradeEventFetchResult
-  kind: trade_events
-  events: list[TradeEvent]
+TradeRecordFetchResult
+  kind: trade_records
+  records: list[NormalizedTradeRecord]
   candidate_checkpoint: string | null
+  history_complete: bool
 ```
 
-现有 X/Binance Square provider 返回 `PostFetchResult`，只使用 `target.handle`；新 provider 必须使用 `target.account_id`，在 provider 边界完成第三方响应 schema 校验与来源字段映射，并返回 `TradeEventFetchResult`。Scheduler 先检查 Provider Health，再把帖子交给现有 `record_fetch`，或把规范化事件交给独立 `trade_reconciler` 和 `record_trade_fetch`。两个 result 分支不能同时携带数据。
+现有 X/Binance Square provider 返回 `PostFetchResult`，只使用 `target.handle`；新 provider 必须使用 `target.account_id`，在 provider 边界完成第三方响应 schema 校验与来源字段映射，并返回 `TradeRecordFetchResult`。Scheduler 先检查 Provider Health，再把帖子交给现有 `record_fetch`，或把规范化记录交给独立 `trade_reconciler` 和 `record_trade_fetch`。两个 result 分支不能同时携带数据。
 
 ## 7. 标准化交易事件
 
-Provider 校验并映射来源记录，向 Collector 返回统一的 `TradeEvent`：
+Provider 校验并映射来源记录，向 Collector 返回统一的 `NormalizedTradeRecord`。Provider 只描述记录的有效交易操作；`trade_reconciler` 结合本地 ledger 判断它是首次出现还是已有记录的新 revision，再生成完整 `TradeEvent`：
 
 ```text
+NormalizedTradeRecord
 schema_version: 1
 platform: okx_orbit | binance_copy
 account_id: string
 source_record_id: string
 revision: string
-action: OPEN | ADD | REDUCE | CLOSE | REVERSE | CORRECTION
+operation: OPEN | ADD | REDUCE | CLOSE | REVERSE
 symbol: string
 position_side: LONG | SHORT | UNKNOWN
 quantity: decimal | null
@@ -199,18 +201,22 @@ price: decimal | null
 leverage: decimal | null
 event_time: datetime
 observed_at: datetime
+source_url: string | null
+
+TradeEvent
+record: NormalizedTradeRecord
+action: OPEN | ADD | REDUCE | CLOSE | REVERSE | CORRECTION
 position_after:
   side: LONG | SHORT | FLAT | UNKNOWN
   quantity: decimal | null
   confidence: HIGH | MEDIUM | LOW | UNKNOWN
-source_url: string | null
 ```
 
 约束：
 
 - 金额和数量在内存、SQLite 与 JSON 序列化中使用十进制字符串，不使用二进制浮点数。
 - `source_record_id` 优先使用交易所稳定记录 ID；若 POC 证明没有稳定 ID，才允许用经过文档化的核心字段哈希。
-- `revision` 是影响交易语义字段的规范化哈希。相同记录、相同 revision 完全幂等；同一记录发生实质修改时生成 `CORRECTION`。
+- `revision` 是影响交易语义字段的规范化哈希。相同记录、相同 revision 完全幂等；同一记录发生实质修改时，新 revision 的 `TradeEvent.action` 为 `CORRECTION`，但重算仍使用该 revision 的 `operation`，避免把“修订通知”误当成持仓运算。
 - 上传使用的 `externalId` 为 `{accountId}:{sourceRecordId}:{revision}`，避免不同账户间冲突。
 - `rawPayload` 只包含该标准化事件和经过字段白名单过滤的来源记录，不含 Cookie、Authorization、设备标识或完整网络响应头。
 
@@ -269,7 +275,7 @@ Outbox 仍使用现有 `outbox_posts`，不另建第二套上传队列。
 - 出现记录缺口、分页不完整或无法解释的修订时，受影响标的降为 `UNKNOWN`，不得继续输出精确数量。
 - 空响应、网络失败、登录失效或页面隐藏均不代表平仓。
 - `CLOSE` 只有在来源记录明确表示该仓位关闭，或完整数量运算严格归零时成立。
-- `REVERSE` 必须能拆解为旧方向归零和新方向建立；否则标记为 `CORRECTION` 并降置信度。
+- `REVERSE` 必须能拆解为旧方向归零和新方向建立；否则将受影响标的降为 `UNKNOWN`。`CORRECTION` 只表示同一来源记录出现了新的有效 revision。
 - 每次新记录或修订到达时，从本地规范化事件重算受影响标的，避免重复抓取导致累计数量错误。
 
 推测结果必须在摘要中写明“推测持仓”和置信度，不能用“当前实际持仓”措辞。
@@ -284,6 +290,8 @@ Outbox 仍使用现有 `outbox_posts`，不另建第二套上传队列。
 - `published_at`：交易事件时间，而非抓取时间。
 - `raw_content`：确定性中文摘要。
 - `raw_payload`：标准化 TradeEvent 与白名单来源字段。
+
+`raw_payload.action` 保存对用户展示的事件动作，`raw_payload.effectiveAction` 保存实际参与持仓重算的 `NormalizedTradeRecord.operation`；普通事件二者相同，修订事件分别为 `CORRECTION` 与修订后的有效操作。
 
 后端分析队列按平台分流：
 
