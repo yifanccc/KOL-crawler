@@ -91,7 +91,7 @@ RawPost -> deterministic trade structurer -> Signal
                     v                         v
         authenticated admin feed          ntfy
 
-Public Signal API / public Dashboard
+Regular Signal API / Dashboard
   -> always excludes private-source subscriptions
 ```
 
@@ -118,7 +118,7 @@ visibility: public | private
 
 ### 6.2 Admin API
 
-`POST /api/v1/admin/subscriptions` 增加可选字段：
+`POST /api/admin/subscriptions` 增加可选字段：
 
 ```json
 {
@@ -302,8 +302,8 @@ ntfy 复用现有通知事件和重试边界，新增平台标题 `OKX Orbit`、
 
 `okx_orbit`、`binance_copy` 的订阅强制为 `private`：
 
-- 公开 `/api/v1/signals`、KOL 页面、资产页面和统计总数必须排除 private 订阅。
-- 新增登录保护的 `GET /api/v1/admin/signals`，返回与公开 Signal API 相同的分页/筛选结构，以复用前端数据类型和卡片。
+- 现有常规 `/api/signals`、KOL 页面、资产页面和统计总数必须排除 private 订阅；即使当前部署整体要求登录，也不能把私域数据混入常规信号流。
+- 新增登录保护的 `GET /api/admin/signals`，返回与常规 Signal API 相同的分页/筛选结构，以复用前端数据类型和卡片。
 - 管理端增加“私有交易信号”入口；不复制一套新的卡片样式。
 - RawPost 和 Signal 可以保存在用户自己的后端数据库，但所有读取入口必须经过现有管理员认证。
 - ntfy 仅发送到订阅已配置的服务器和 topic；不把登录态或原始来源记录放入消息。
@@ -375,7 +375,7 @@ ntfy 复用现有通知事件和重试边界，新增平台标题 `OKX Orbit`、
 - 新平台和 `accountId` 的平台相关校验。
 - Collector config 的 `accountId` 增量契约。
 - deterministic trade structurer 不调用模型，并拒绝非法 schema/version。
-- private Signal 不出现在公开列表、KOL、资产和统计 API。
+- private Signal 不出现在常规列表、KOL、资产和统计 API。
 - 未登录不能读取 Admin Signal API。
 - 交易动作、stance、actionable、置信度、平台标题和 ntfy 文案映射。
 - RawPost 与 Signal 的重复上传仍保持幂等。
@@ -383,9 +383,9 @@ ntfy 复用现有通知事件和重试边界，新增平台标题 `OKX Orbit`、
 ### 15.3 Frontend 与端到端
 
 - Admin 表单只对新平台要求账号 ID，并显示固定 ID 而不是只显示昵称。
-- 私有交易信号复用现有卡片、分页和筛选，不出现在公开首页。
+- 私有交易信号复用现有卡片、分页和筛选，不出现在常规首页。
 - 注入一条交易夹具后，只生成一条 private Signal 和一条 ntfy 事件。
-- 浏览器验证公开页面不会请求或渲染 private Signal。
+- 浏览器验证常规页面不会请求或渲染 private Signal。
 
 ## 16. 验收标准
 
@@ -396,8 +396,8 @@ ntfy 复用现有通知事件和重试边界，新增平台标题 `OKX Orbit`、
 - 重复记录、进程重启和 outbox 重试不会重复推送。
 - 登录失效、空响应和接口结构变化不会产生“已平仓”误报。
 - 交易数值不经过 LLM，来源缺失的字段保持未知。
-- 私有交易记录和信号不会出现在任何公开 API、页面或统计中。
-- 现有 X、Binance Square 订阅行为和公开 Dashboard 不回归。
+- 私有交易记录和信号不会出现在任何常规 Signal API、页面或统计中，只能通过管理端私有入口读取。
+- 现有 X、Binance Square 订阅行为和 Dashboard 不回归。
 
 ## 17. 实施顺序与停止条件
 
@@ -415,7 +415,7 @@ ntfy 复用现有通知事件和重试边界，新增平台标题 `OKX Orbit`、
 - OKX POC 为 `unsupported`。
 - Binance 登录态无法在不导出 Cookie/凭据的情况下运行。
 - 数据源不提供稳定记录 ID，且无法构造经重复抓取验证的确定性指纹。
-- 无法在公开 API 层证明 private 数据被完整排除。
+- 无法在常规 API 层证明 private 数据被完整排除。
 
 触发任一停止条件时，不采用替代抓取方式，不扩大权限，先向用户报告证据并确认。
 
