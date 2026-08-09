@@ -1,0 +1,51 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "success": true,
+  "data": {
+    "list": [
+      {
+        "symbol": "ETHUSDT",
+        "baseAsset": "ETH",
+        "quoteAsset": "USDT",
+        "side": "SELL",
+        "type": "MARKET",
+        "positionSide": "SHORT",
+        "executedQty": 2.0,
+        "avgPrice": 3200.0,
+        "totalPnl": 0.0,
+        "orderUpdateTime": 1786248000000,
+        "orderTime": 1786247999000
+      },
+      {
+        "symbol": "BTCUSDT",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "side": "SELL",
+        "type": "MARKET",
+        "positionSide": "LONG",
+        "executedQty": 0.1,
+        "avgPrice": 61000.0,
+        "totalPnl": 100.0,
+        "orderUpdateTime": 1786244400000,
+        "orderTime": 1786244399000
+      },
+      {
+        "symbol": "BTCUSDT",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "positionSide": "LONG",
+        "executedQty": 0.25,
+        "avgPrice": 60000.0,
+        "totalPnl": 0.0,
+        "orderUpdateTime": 1786240800000,
+        "orderTime": 1786240799000
+      }
+    ],
+    "total": 31,
+    "indexValue": "1786240800000"
+  }
+}
