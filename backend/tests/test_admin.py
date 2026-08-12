@@ -4,7 +4,14 @@ from fastapi.testclient import TestClient
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.main import app
-from app.models import RawPost, Signal, Subscription
+from app.models import (
+    Asset,
+    KolProfile,
+    RawPost,
+    Signal,
+    SignalAsset,
+    Subscription,
+)
 from app.services.structurer import (
     DEFAULT_OUTPUT_SCHEMA,
     DEFAULT_SYSTEM_PROMPT,
@@ -23,6 +30,55 @@ def auth_headers(client: TestClient) -> dict[str, str]:
         json={"username": "testadmin", "password": "test-admin-password"},
     ).json()["accessToken"]
     return {"Authorization": f"Bearer {token}"}
+
+
+def seed_signal(
+    *,
+    visibility: str,
+    platform: str,
+    summary: str,
+    signal_has_subscription: bool = True,
+    account_id: str = "5075281354358777856",
+) -> tuple[int, int]:
+    with SessionLocal.begin() as session:
+        kol = KolProfile(platform=platform, display_name=f"{platform}-{summary}")
+        session.add(kol)
+        session.flush()
+        subscription = Subscription(
+            kol_profile_id=kol.id,
+            platform=platform,
+            platform_account_id=(
+                account_id if platform == "binance_copy" else None
+            ),
+            platform_handle=kol.display_name,
+            visibility=visibility,
+            interval_minutes=10,
+        )
+        session.add(subscription)
+        session.flush()
+        raw_post = RawPost(
+            subscription_id=subscription.id,
+            platform=platform,
+            external_id=f"{platform}-{summary}",
+            author_name=kol.display_name,
+            raw_text=summary,
+            analysis_status="completed",
+        )
+        session.add(raw_post)
+        session.flush()
+        signal = Signal(
+            raw_post_id=raw_post.id,
+            subscription_id=subscription.id if signal_has_subscription else None,
+            actionable=True,
+            stance="neutral",
+            summary=summary,
+            structured_status=(
+                "deterministic" if visibility == "private" else "ok"
+            ),
+        )
+        session.add(signal)
+        session.flush()
+        return signal.id, kol.id
 
 
 def test_login_sets_http_only_cookie_and_logout_revokes_access() -> None:
@@ -194,6 +250,77 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
     assert duplicate.status_code == 409
     assert mutable_interval.status_code == 422
     assert mutable_account.status_code == 422
+
+
+def test_private_trade_data_only_appears_in_admin_scope() -> None:
+    reset_database()
+    public_signal_id, public_kol_id = seed_signal(
+        visibility="public", platform="x", summary="公开信号"
+    )
+    private_signal_id, private_kol_id = seed_signal(
+        visibility="private",
+        platform="binance_copy",
+        summary="私有交易变化",
+    )
+    fallback_private_id, fallback_private_kol_id = seed_signal(
+        visibility="private",
+        platform="binance_copy",
+        summary="私有回退关联",
+        signal_has_subscription=False,
+        account_id="5075281354358777857",
+    )
+    with SessionLocal.begin() as session:
+        public_signal = session.get(Signal, public_signal_id)
+        private_signal = session.get(Signal, private_signal_id)
+        fallback_private = session.get(Signal, fallback_private_id)
+        shared = Asset(symbol="BTCUSDT", market="CRYPTO", asset_type="crypto")
+        private_only = Asset(
+            symbol="ETHUSDT", market="CRYPTO", asset_type="crypto"
+        )
+        orphan = Asset(symbol="LEGACY", market="CRYPTO", asset_type="crypto")
+        session.add_all([shared, private_only, orphan])
+        session.flush()
+        session.add_all(
+            [
+                SignalAsset(signal_id=public_signal.id, asset_id=shared.id),
+                SignalAsset(signal_id=private_signal.id, asset_id=shared.id),
+                SignalAsset(signal_id=fallback_private.id, asset_id=private_only.id),
+            ]
+        )
+
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        regular = client.get("/api/signals", headers=headers)
+        private = client.get("/api/admin/signals", headers=headers)
+        leaked_detail = client.get(
+            f"/api/signals/{private_signal_id}", headers=headers
+        )
+        fallback_leaked_detail = client.get(
+            f"/api/signals/{fallback_private_id}", headers=headers
+        )
+        kols = client.get("/api/kols", headers=headers)
+        assets = client.get("/api/assets", headers=headers)
+    with TestClient(app) as anonymous_client:
+        anonymous = anonymous_client.get("/api/admin/signals")
+
+    assert [item["summary"] for item in regular.json()["items"]] == ["公开信号"]
+    assert {item["summary"] for item in private.json()["items"]} == {
+        "私有交易变化",
+        "私有回退关联",
+    }
+    assert regular.json()["overallTotal"] == 1
+    assert private.json()["overallTotal"] == 2
+    assert leaked_detail.json()["item"] is None
+    assert fallback_leaked_detail.json()["item"] is None
+    visible_kol_ids = {item["id"] for item in kols.json()["items"]}
+    assert public_kol_id in visible_kol_ids
+    assert private_kol_id not in visible_kol_ids
+    assert fallback_private_kol_id not in visible_kol_ids
+    assert {item["symbol"] for item in assets.json()["items"]} == {
+        "BTCUSDT",
+        "LEGACY",
+    }
+    assert anonymous.status_code == 401
 
 
 def test_regular_subscription_rejects_trade_account_id() -> None:

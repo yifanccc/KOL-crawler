@@ -1,8 +1,9 @@
 import json
 from datetime import UTC, datetime
+from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from app.models import CrawlRun, KolProfile, ModelConfig, NotificationEvent, Not
 from app.models.subscription import DEFAULT_MONITOR_INTERVAL_MINUTES, TRADE_PLATFORMS
 from app.routers.auth import authenticate, require_authenticated, set_session_cookie
 from app.services.collector_health import collector_health_payload
+from app.services.signal_feed import signal_page
 from app.services.structurer import (
     DEFAULT_OUTPUT_SCHEMA,
     DEFAULT_SYSTEM_PROMPT,
@@ -405,6 +407,38 @@ def delete_subscription(
         rule.enabled = False
     db.commit()
     return Response(status_code=204)
+
+
+@router.get("/signals")
+def private_signals(
+    kol_id: int | None = None,
+    asset: str | None = None,
+    symbol: str | None = None,
+    tag: str | None = None,
+    stance: str | None = None,
+    actionable: bool | None = None,
+    platform: str | None = None,
+    time_range: Literal["all", "1h", "6h", "24h", "7d"] = "all",
+    min_importance: int = Query(default=1, ge=1, le=5),
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _: str = Depends(require_admin),
+) -> dict:
+    return signal_page(
+        db,
+        visibility="private",
+        kol_id=kol_id,
+        platform=platform,
+        asset=asset or symbol,
+        tag=tag,
+        stance=stance,
+        actionable=actionable,
+        time_range=time_range,
+        min_importance=min_importance,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/crawl-runs")
