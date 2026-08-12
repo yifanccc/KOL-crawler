@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { FeedCard } from "@/components/FeedCard";
 import { FilterBar } from "@/components/FilterBar";
 import { LoadingState } from "@/components/LoadingState";
+import { Sidebar } from "@/components/Sidebar";
 import { fetchPrivateSignalPage } from "@/lib/api";
 import {
   defaultDashboardFilters,
@@ -172,29 +173,33 @@ export function PrivateSignalFeed() {
   const hasMore = hasMoreSignals(nextOffset, page.total);
 
   return (
-    <main className="admin-shell private-signal-shell">
-      <header className="settings-header private-signal-header">
-        <div>
-          <Link className="back-link" href="/admin">
-            <ArrowLeft size={14} aria-hidden="true" />返回监控设置
-          </Link>
-          <p className="eyebrow">Private Trade Feed</p>
-          <h1>私有交易信号</h1>
-          <p className="private-signal-description">
-            交易事件来自只读成交记录；持仓为推测值，不代表交易所实时持仓
-          </p>
-        </div>
-        <button
-          type="button"
-          className="settings-new-button"
-          disabled={loading}
-          onClick={reload}
-        >
-          <RefreshCw size={15} aria-hidden="true" />刷新
-        </button>
-      </header>
+    <div className="dashboard-shell">
+      <Sidebar />
+      <main className="positions-stage private-signal-shell">
+        <header className="positions-header private-signal-header">
+          <div>
+            <p className="eyebrow">Private Trade Feed</p>
+            <h1>成交变化</h1>
+            <p className="private-signal-description">
+              交易事件来自只读成交记录；持仓为推测值，不代表交易所实时持仓
+            </p>
+          </div>
+          <button
+            type="button"
+            className="settings-new-button"
+            disabled={loading}
+            onClick={reload}
+          >
+            <RefreshCw size={15} aria-hidden="true" />刷新
+          </button>
+        </header>
 
-      <FilterBar
+        <nav className="positions-tabs" aria-label="持仓监控子页面">
+          <Link href="/positions">当前持仓</Link>
+          <Link className="active" href="/positions/history">成交变化</Link>
+        </nav>
+
+        <FilterBar
         filters={filters}
         kols={filterOptions.kols}
         assets={filterOptions.assets}
@@ -202,9 +207,9 @@ export function PrivateSignalFeed() {
         platforms={filterOptions.platforms}
         onChange={applyFilters}
         onReset={() => applyFilters(defaultDashboardFilters)}
-      />
+        />
 
-      <section className="feed-section" aria-live="polite">
+        <section className="feed-section" aria-live="polite">
         <div className="section-heading feed-section-heading">
           <div>
             <p className="terminal-label">Binance Copy</p>
@@ -259,7 +264,8 @@ export function PrivateSignalFeed() {
             ) : null}
           </div>
         ) : null}
-      </section>
-    </main>
+        </section>
+      </main>
+    </div>
   );
 }

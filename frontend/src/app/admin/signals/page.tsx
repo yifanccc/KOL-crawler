@@ -1,6 +1,6 @@
-import { PrivateSignalFeed } from "@/components/PrivateSignalFeed";
+import { redirect } from "next/navigation";
 
 
 export default function PrivateSignalsPage() {
-  return <PrivateSignalFeed />;
+  redirect("/positions/history");
 }

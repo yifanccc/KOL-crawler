@@ -2625,6 +2625,318 @@ button.tag-badge {
   line-height: 1.45;
 }
 
+.positions-stage {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.positions-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(13, 18, 26, 0.94);
+}
+
+.positions-header h1 {
+  margin: 4px 0 0;
+  color: var(--text-strong);
+  font-size: clamp(1.3rem, 3vw, 1.9rem);
+}
+
+.positions-header p:last-child {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.positions-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.positions-header-actions a,
+.positions-header-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--cyan);
+  font-weight: 800;
+  background: var(--panel-2);
+}
+
+.positions-header-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.positions-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.positions-tabs a {
+  min-width: 108px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.positions-tabs a:hover,
+.positions-tabs a.active {
+  color: var(--cyan);
+  border-color: rgba(0, 194, 255, 0.35);
+  background: var(--cyan-soft);
+}
+
+.position-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(245, 197, 66, 0.32);
+  border-radius: var(--radius);
+  background: var(--unknown-soft);
+}
+
+.position-disclaimer > svg {
+  flex: 0 0 auto;
+  color: var(--unknown);
+}
+
+.position-disclaimer strong,
+.position-disclaimer span {
+  display: block;
+}
+
+.position-disclaimer strong {
+  color: var(--text-strong);
+  font-size: 0.84rem;
+}
+
+.position-disclaimer span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.position-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.position-metrics article {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.position-metrics svg {
+  flex: 0 0 auto;
+  color: var(--cyan);
+}
+
+.position-metrics strong,
+.position-metrics span {
+  display: block;
+}
+
+.position-metrics strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 1.15rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.position-metrics span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.position-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.position-card {
+  display: grid;
+  gap: 13px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--neutral);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.position-card.side-long {
+  border-top-color: var(--long);
+}
+
+.position-card.side-short {
+  border-top-color: var(--short);
+}
+
+.position-card.position-stale,
+.position-card.position-unknown {
+  border-top-color: var(--unknown);
+}
+
+.position-card > header,
+.position-symbol-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.position-card > header div {
+  min-width: 0;
+}
+
+.position-card > header span,
+.position-card > header small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.position-card > header span {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.position-card > header small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.69rem;
+}
+
+.position-card > header em {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+  background: var(--panel-2);
+}
+
+.position-card.position-active > header em {
+  color: var(--long);
+  border-color: rgba(32, 201, 151, 0.35);
+  background: var(--long-soft);
+}
+
+.position-card.position-stale > header em,
+.position-card.position-unknown > header em {
+  color: var(--unknown);
+  border-color: rgba(245, 197, 66, 0.35);
+  background: var(--unknown-soft);
+}
+
+.position-symbol-row strong {
+  color: var(--text-strong);
+  font-size: 1.45rem;
+  letter-spacing: 0.01em;
+}
+
+.position-symbol-row span {
+  color: var(--neutral);
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.position-card.side-long .position-symbol-row span {
+  color: var(--long);
+}
+
+.position-card.side-short .position-symbol-row span {
+  color: var(--short);
+}
+
+.position-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.position-card dl div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.position-card dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.position-card dd {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+}
+
+.position-card > p {
+  margin: 0;
+  color: var(--unknown);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.spin {
+  animation: position-spin 0.9s linear infinite;
+}
+
+@keyframes position-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 1180px) {
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -2706,6 +3018,7 @@ button.tag-badge {
 
 @media (max-width: 620px) {
   .dashboard-stage,
+  .positions-stage,
   .app-shell,
   .admin-shell {
     padding: 10px;
@@ -2715,6 +3028,7 @@ button.tag-badge {
   .stat-grid,
   .filter-bar,
   .admin-grid,
+  .position-metrics,
   .settings-basic-grid {
     grid-template-columns: 1fr;
   }
@@ -2769,7 +3083,7 @@ button.tag-badge {
 
   .sidebar-nav {
     grid-auto-flow: initial;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
     overflow: visible;
   }
@@ -2781,6 +3095,25 @@ button.tag-badge {
     min-height: 48px;
     padding: 4px 2px;
     font-size: 0.68rem;
+  }
+
+  .positions-header,
+  .positions-header-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .positions-header-actions > * {
+    width: 100%;
+  }
+
+  .positions-tabs a {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  .position-card dl {
+    grid-template-columns: 1fr;
   }
 
   .feed-card-header,

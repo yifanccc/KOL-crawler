@@ -2,12 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BellRing, Hash, Settings, UsersRound } from "lucide-react";
+import {
+  BarChart3,
+  BellRing,
+  CandlestickChart,
+  Hash,
+  Settings,
+  UsersRound,
+} from "lucide-react";
 
 const navItems = [
   { label: "总览", href: "/", icon: BarChart3 },
   { label: "KOL", href: "/kols", icon: UsersRound },
   { label: "标的", href: "/assets", icon: Hash },
+  { label: "持仓", href: "/positions", icon: CandlestickChart },
   { label: "设置", href: "/admin", icon: Settings },
 ];
 
