@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -6,7 +7,16 @@ from sqlalchemy import func, select
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.main import app
-from app.models import NotificationEvent, NotificationRule, RawPost, Signal, SignalAsset, SignalTag, Subscription
+from app.models import (
+    KolProfile,
+    NotificationEvent,
+    NotificationRule,
+    RawPost,
+    Signal,
+    SignalAsset,
+    SignalTag,
+    Subscription,
+)
 from app.services.analysis_queue import process_pending_posts
 from app.services.notifications import dispatch_notifications
 from app.services.structurer import FallbackStructurer, HeuristicStructurer, Structurer
@@ -106,3 +116,112 @@ def test_fixture_upload_to_analysis_is_idempotent(monkeypatch) -> None:
         assert all(row.analysis_status == "completed" for row in session.scalars(select(RawPost)).all())
         assert all(signal.structured_status == "fallback" for signal in session.scalars(select(Signal)).all())
     assert len(ntfy.calls) == expected_notifications
+
+
+def test_binance_trade_upload_is_deterministic_and_private(monkeypatch) -> None:
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    account_id = "5075281354358777856"
+    with SessionLocal.begin() as session:
+        kol = KolProfile(platform="binance_copy", display_name="熬鹰资本")
+        session.add(kol)
+        session.flush()
+        subscription = Subscription(
+            platform="binance_copy",
+            platform_account_id=account_id,
+            platform_handle="熬鹰资本",
+            visibility="private",
+            interval_minutes=10,
+            kol_profile_id=kol.id,
+        )
+        session.add(subscription)
+        session.flush()
+        subscription_id = subscription.id
+        session.add(
+            NotificationRule(
+                subscription_id=subscription_id,
+                ntfy_server="https://ntfy.invalid",
+                ntfy_topic="trade-e2e",
+                min_confidence="低",
+                require_asset=True,
+            )
+        )
+
+    raw_payload = {
+        "schemaVersion": 1,
+        "platform": "binance_copy",
+        "accountId": account_id,
+        "sourceRecordId": "2",
+        "revision": "r1",
+        "action": "ADD",
+        "effectiveAction": "INCREASE",
+        "symbol": "BTCUSDT",
+        "positionSide": "LONG",
+        "quantity": "0.05",
+        "price": "50000",
+        "leverage": "10",
+        "eventTime": "2026-08-09T01:02:00Z",
+        "positionAfter": {
+            "side": "LONG",
+            "quantity": "0.15",
+            "confidence": "LOW",
+            "status": "ACTIVE",
+        },
+        "sourceRecord": {"id": "2"},
+    }
+    external_id = f"{account_id}:2:r1"
+    post = {
+        "subscriptionId": subscription_id,
+        "platform": "binance_copy",
+        "externalId": external_id,
+        "authorHandle": "熬鹰资本",
+        "authorName": "熬鹰资本",
+        "publishedAt": raw_payload["eventTime"],
+        "url": (
+            "https://www.binance.com/zh-CN/copy-trading/lead-details/"
+            f"{account_id}"
+        ),
+        "rawContent": "熬鹰资本 BTCUSDT 加仓 多头",
+        "rawPayload": raw_payload,
+    }
+
+    model = Mock()
+    model.structure.side_effect = AssertionError("LLM must not run")
+    ntfy = FakeNtfyClient()
+    monkeypatch.setattr(
+        "app.services.analysis_queue.dispatch_notifications",
+        lambda session, signal: dispatch_notifications(session, signal, client=ntfy),
+    )
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/collector/posts",
+            headers=HEADERS,
+            json={"agentId": "home-mac-01", "posts": [post]},
+        )
+        assert upload.json()["items"] == [
+            {"externalId": external_id, "status": "accepted"}
+        ]
+
+        with SessionLocal() as session:
+            assert process_pending_posts(session, model) == 1
+            assert session.scalar(
+                select(func.count()).select_from(NotificationEvent)
+            ) == 1
+        model.structure.assert_not_called()
+        assert len(ntfy.calls) == 1
+
+        login = client.post(
+            "/api/auth/login",
+            json={"username": "testadmin", "password": "test-admin-password"},
+        )
+        assert login.status_code == 200
+        regular = client.get("/api/signals")
+        private = client.get("/api/admin/signals")
+
+    assert regular.json()["items"] == []
+    assert regular.json()["overallTotal"] == 0
+    private_items = private.json()["items"]
+    assert len(private_items) == 1
+    assert private_items[0]["platform"] == "BINANCE_COPY"
+    assert private_items[0]["structuredStatus"] == "deterministic"
+    assert private_items[0]["actionable"] is True

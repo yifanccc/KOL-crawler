@@ -29,6 +29,10 @@ MARKETS = {"crypto", "us_stock", "a_share", "hk_stock", "macro", "unknown"}
 ALL_MARKETS = ["crypto", "us_stock", "a_share", "hk_stock", "macro", "unknown"]
 
 
+def _notification_min_confidence(platform: str) -> str:
+    return "低" if platform in TRADE_PLATFORMS else "中"
+
+
 def _normalize_handle(platform: str, value: str) -> str:
     handle = value.strip().rstrip("/")
     if platform == "binance_square" and "://" in handle:
@@ -292,7 +296,7 @@ def create_subscription(
         rule.ntfy_server = payload.ntfyServer
         rule.ntfy_topic = payload.ntfyTopic
         rule.ntfy_token_encrypted = payload.ntfyToken
-        rule.min_confidence = "中"
+        rule.min_confidence = _notification_min_confidence(payload.platform)
         rule.require_asset = True
         rule.enabled = True
         db.commit()
@@ -323,7 +327,7 @@ def create_subscription(
             ntfy_server=payload.ntfyServer,
             ntfy_topic=payload.ntfyTopic,
             ntfy_token_encrypted=payload.ntfyToken,
-            min_confidence="中",
+            min_confidence=_notification_min_confidence(payload.platform),
             require_asset=True,
             enabled=True,
         )
@@ -376,7 +380,11 @@ def update_subscription(
         subscription.enabled = payload.enabled
     rule = db.scalar(select(NotificationRule).where(NotificationRule.subscription_id == subscription.id))
     if rule is None:
-        rule = NotificationRule(subscription_id=subscription.id, min_confidence="中", require_asset=True)
+        rule = NotificationRule(
+            subscription_id=subscription.id,
+            min_confidence=_notification_min_confidence(subscription.platform),
+            require_asset=True,
+        )
         db.add(rule)
     if payload.ntfyServer is not None:
         rule.ntfy_server = payload.ntfyServer

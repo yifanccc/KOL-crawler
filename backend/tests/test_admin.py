@@ -7,6 +7,7 @@ from app.main import app
 from app.models import (
     Asset,
     KolProfile,
+    NotificationRule,
     RawPost,
     Signal,
     SignalAsset,
@@ -149,6 +150,12 @@ def test_admin_can_create_and_update_subscription() -> None:
             },
         )
         list_response = client.get("/api/admin/subscriptions", headers=headers)
+    with SessionLocal() as session:
+        notification_rule = session.scalar(
+            select(NotificationRule).where(
+                NotificationRule.subscription_id == item["id"]
+            )
+        )
 
     assert update_response.status_code == 200
     updated = update_response.json()["item"]
@@ -156,6 +163,8 @@ def test_admin_can_create_and_update_subscription() -> None:
     assert updated["enabled"] is False
     assert updated["systemPrompt"] == "只提取明确交易观点。"
     assert updated["markets"] == ["a_share"]
+    assert notification_rule is not None
+    assert notification_rule.min_confidence == "中"
     assert any(row["handle"] == "senerity" for row in list_response.json()["items"])
 
 
@@ -240,6 +249,12 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
             headers=headers,
             json={"accountId": "11111111"},
         )
+    with SessionLocal() as session:
+        notification_rule = session.scalar(
+            select(NotificationRule).where(
+                NotificationRule.subscription_id == item["id"]
+            )
+        )
 
     assert missing_account.status_code == 422
     assert invalid_account.status_code == 422
@@ -247,6 +262,8 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
     assert item["accountId"] == "5075281354358777856"
     assert item["visibility"] == "private"
     assert item["intervalMinutes"] == 10
+    assert notification_rule is not None
+    assert notification_rule.min_confidence == "低"
     assert duplicate.status_code == 409
     assert mutable_interval.status_code == 422
     assert mutable_account.status_code == 422

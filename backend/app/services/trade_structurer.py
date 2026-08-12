@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import RawPost, Subscription
-from app.services.structurer import StructuredSignal
+from app.services.structurer import STANCE_CN, StructuredSignal
 
 
 TradeAction = Literal["OPEN", "ADD", "REDUCE", "CLOSE", "REVERSE", "CORRECTION"]
@@ -182,7 +182,7 @@ def build_trade_signal_fields(
     structured = StructuredSignal(
         summary_cn=summary,
         stance=stance,
-        stance_cn="中性",
+        stance_cn=STANCE_CN[stance],
         symbols=[payload.symbol],
         market="crypto",
         key_points=[

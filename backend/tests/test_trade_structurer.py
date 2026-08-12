@@ -121,14 +121,14 @@ def test_trade_post_is_structured_deterministically_without_model_call(
 
 
 @pytest.mark.parametrize(
-    ("action", "effective_action", "side", "stance", "importance"),
+    ("action", "effective_action", "side", "stance", "stance_cn", "importance"),
     [
-        ("OPEN", "INCREASE", "LONG", "bullish", 4),
-        ("ADD", "INCREASE", "SHORT", "bearish", 3),
-        ("REVERSE", "REVERSE", "LONG", "bullish", 4),
-        ("REDUCE", "DECREASE", "LONG", "neutral", 3),
-        ("CLOSE", "DECREASE", "SHORT", "neutral", 4),
-        ("CORRECTION", "INCREASE", "LONG", "neutral", 2),
+        ("OPEN", "INCREASE", "LONG", "bullish", "多", 4),
+        ("ADD", "INCREASE", "SHORT", "bearish", "空", 3),
+        ("REVERSE", "REVERSE", "LONG", "bullish", "多", 4),
+        ("REDUCE", "DECREASE", "LONG", "neutral", "中性", 3),
+        ("CLOSE", "DECREASE", "SHORT", "neutral", "中性", 4),
+        ("CORRECTION", "INCREASE", "LONG", "neutral", "中性", 2),
     ],
 )
 def test_trade_action_mapping_matches_reconciled_binance_events(
@@ -136,6 +136,7 @@ def test_trade_action_mapping_matches_reconciled_binance_events(
     effective_action: str,
     side: str,
     stance: str,
+    stance_cn: str,
     importance: int,
 ) -> None:
     subscription = Subscription(
@@ -163,6 +164,7 @@ def test_trade_action_mapping_matches_reconciled_binance_events(
 
     assert fields.actionable is True
     assert fields.structured.stance == stance
+    assert fields.structured.stance_cn == stance_cn
     assert fields.structured.importance == importance
     assert fields.structured_status == "deterministic"
     assert fields.tag_source == "deterministic"
