@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from collector_agent.db import CollectorStore
 from collector_agent.models import TRADE_PLATFORMS, ProviderTarget
+from collector_agent.providers.base import TradeHistoryGap
 
 
 class CollectorScheduler:
@@ -120,6 +121,15 @@ class CollectorScheduler:
                 self.provider_failures.pop(subscription["platform"], None)
                 ran.append(subscription_id)
                 self._log_subscription(now, subscription, status, fetched=fetched)
+            except TradeHistoryGap as exc:
+                self.store.mark_trade_positions_unknown(subscription_id, now)
+                self.provider_failures.pop(subscription["platform"], None)
+                self._log_subscription(
+                    now,
+                    subscription,
+                    "failed",
+                    error=type(exc).__name__,
+                )
             except Exception as exc:
                 if subscription["platform"] in TRADE_PLATFORMS:
                     self.store.mark_trade_positions_stale(subscription_id, now)

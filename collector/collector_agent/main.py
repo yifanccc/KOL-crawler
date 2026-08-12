@@ -10,6 +10,7 @@ from collector_agent.api_client import CollectorApiClient
 from collector_agent.binance_browser import BinanceSquareBrowserClient
 from collector_agent.config import CollectorSettings
 from collector_agent.db import CollectorStore
+from collector_agent.providers.binance_copy import BinanceCopyProvider
 from collector_agent.providers.binance_square import BinanceSquareProvider
 from collector_agent.providers.x_opencli import OpenCliXProvider
 from collector_agent.scheduler import CollectorScheduler
@@ -24,6 +25,7 @@ def build_providers(settings: CollectorSettings) -> dict:
                 lang=settings.binance_square_lang,
             )
         ),
+        "binance_copy": BinanceCopyProvider(),
     }
 
 

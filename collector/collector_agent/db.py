@@ -6,6 +6,7 @@ from collector_agent.models import CollectedPost, OutboxPost, ProviderTarget, co
 from collector_agent.trade_models import PositionEstimate, TradePositionSide, TradeRecordFetchResult
 from collector_agent.trade_store import (
     initialize_trade_store,
+    mark_trade_positions_unknown,
     mark_trade_positions_stale,
     position_for,
     record_trade_fetch,
@@ -55,6 +56,9 @@ class CollectorStore:
         self, subscription_id: int, stale_since
     ) -> None:
         mark_trade_positions_stale(self.connection, subscription_id, stale_since)
+
+    def mark_trade_positions_unknown(self, subscription_id: int, gap_at) -> None:
+        mark_trade_positions_unknown(self.connection, subscription_id, gap_at)
 
     def position_for(
         self,

@@ -6,7 +6,7 @@ import pytest
 from collector_agent.db import CollectorStore
 from collector_agent.models import CollectedPost, PostFetchResult, ProviderTarget
 from collector_agent.scheduler import CollectorScheduler
-from collector_agent.providers.base import ProviderHealth
+from collector_agent.providers.base import ProviderHealth, TradeHistoryGap
 from collector_agent.trade_models import TradeRecordFetchResult
 from tests.trade_samples import checkpoint, sample_record
 
@@ -352,6 +352,12 @@ class RaisingTradeProvider(TradeProvider):
         raise RuntimeError("temporary Binance failure")
 
 
+class GapTradeProvider(TradeProvider):
+    def fetch(self, target, current_checkpoint, limit):
+        self._health = ProviderHealth("access_limited", "checkpoint missing from overlap")
+        raise TradeHistoryGap("checkpoint missing from overlap")
+
+
 @pytest.mark.parametrize(
     "failed_provider",
     [UnhealthyTradeProvider(), RaisingTradeProvider()],
@@ -383,3 +389,29 @@ def test_scheduler_marks_trade_position_stale_without_advancing_checkpoint(
     assert position is not None
     assert position.status == "STALE"
     assert position.quantity == Decimal("0.10")
+
+
+def test_scheduler_marks_trade_position_unknown_when_overlap_has_a_gap(tmp_path):
+    store = CollectorStore(tmp_path / "db.sqlite")
+    store.record_trade_fetch(
+        21,
+        ProviderTarget(21, "binance_copy", "5075281354358777856", "熬鹰资本"),
+        TradeRecordFetchResult(
+            [sample_record("1", "OPEN", "LONG", "0.10")],
+            checkpoint("1"),
+            history_complete=False,
+        ),
+    )
+    scheduler = CollectorScheduler(
+        store,
+        TradeApi(),
+        {"binance_copy": GapTradeProvider()},
+    )
+
+    assert scheduler.run_once(datetime(2026, 8, 9, 1, tzinfo=UTC)) == []
+
+    position = store.position_for(21, "BTCUSDT", "LONG")
+    assert position is not None
+    assert position.status == "UNKNOWN"
+    assert position.quantity is None
+    assert store.checkpoint_for(21) == checkpoint("1")

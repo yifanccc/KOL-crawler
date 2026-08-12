@@ -268,6 +268,21 @@ def mark_trade_positions_stale(
         )
 
 
+def mark_trade_positions_unknown(
+    connection: sqlite3.Connection,
+    subscription_id: int,
+    gap_at: datetime,
+) -> None:
+    timestamp = _datetime_text(gap_at)
+    with connection:
+        connection.execute(
+            "UPDATE position_estimates SET side = 'UNKNOWN', quantity = NULL, "
+            "confidence = 'UNKNOWN', status = 'UNKNOWN', stale_since = ?, updated_at = ? "
+            "WHERE subscription_id = ?",
+            (timestamp, timestamp, subscription_id),
+        )
+
+
 def position_for(
     connection: sqlite3.Connection,
     subscription_id: int,

@@ -5,3 +5,7 @@ from dataclasses import dataclass
 class ProviderHealth:
     status: str
     message: str | None = None
+
+
+class TradeHistoryGap(RuntimeError):
+    """The fixed overlap window no longer contains the saved checkpoint."""

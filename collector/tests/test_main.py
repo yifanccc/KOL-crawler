@@ -4,6 +4,7 @@ from pathlib import Path
 from collector_agent.config import CollectorSettings
 from collector_agent.main import build_providers
 from collector_agent.models import ProviderTarget
+from collector_agent.providers.binance_copy import BinanceCopyProvider
 from collector_agent.providers.binance_square import BinanceSquareProvider
 from collector_agent.providers.x_opencli import OpenCliXProvider
 
@@ -34,6 +35,7 @@ def test_build_providers_wires_opencli_and_binance_browser_client(monkeypatch):
 
     assert isinstance(providers["x"], OpenCliXProvider)
     assert isinstance(providers["binance_square"], BinanceSquareProvider)
+    assert isinstance(providers["binance_copy"], BinanceCopyProvider)
     target = ProviderTarget(2, "binance_square", None, "btc7873")
     assert providers["binance_square"].fetch(target, None, 1).posts == []
     assert clients == [{

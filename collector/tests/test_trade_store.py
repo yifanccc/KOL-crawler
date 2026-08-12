@@ -179,3 +179,24 @@ def test_mark_trade_positions_stale_preserves_estimate_and_checkpoint(tmp_path) 
     assert position.status == "STALE"
     assert position.stale_since == stale_since
     assert TradeCheckpoint.decode(store.checkpoint_for(7)).record_id == "1"
+
+
+def test_mark_trade_positions_unknown_clears_unreliable_quantity_only(tmp_path) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    store.record_trade_fetch(
+        7,
+        trade_target(),
+        trade_result([sample_record("1", "OPEN", "LONG", "0.25")], "1"),
+    )
+    gap_at = datetime(2026, 8, 9, 3, 0, tzinfo=UTC)
+
+    store.mark_trade_positions_unknown(7, gap_at)
+
+    position = store.position_for(7, "BTCUSDT", "LONG")
+    assert position is not None
+    assert position.side == "UNKNOWN"
+    assert position.quantity is None
+    assert position.confidence == "UNKNOWN"
+    assert position.status == "UNKNOWN"
+    assert position.stale_since == gap_at
+    assert TradeCheckpoint.decode(store.checkpoint_for(7)).record_id == "1"
