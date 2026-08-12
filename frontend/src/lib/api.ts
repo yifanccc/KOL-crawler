@@ -289,6 +289,8 @@ function normalizeAdminSubscription(value: unknown): AdminSubscription {
     id: numberValue(source.id) ?? 0,
     platform: text(source.platform, "x"),
     handle: text(source.handle, "unknown"),
+    accountId: text(source.accountId) || null,
+    visibility: source.visibility === "private" ? "private" : "public",
     intervalMinutes: numberValue(source.intervalMinutes) ?? 10,
     enabled: source.enabled !== false,
     checkpoint: text(source.checkpoint) || null,
@@ -331,6 +333,7 @@ export async function fetchAdminConfigOptions(): Promise<AdminConfigOptions> {
 export interface AdminSubscriptionInput {
   platform: string;
   handle: string;
+  accountId?: string;
   intervalMinutes: number;
   systemPrompt: string;
   userPrompt: string;
@@ -354,7 +357,7 @@ export async function createAdminSubscription(
 
 export async function updateAdminSubscription(
   id: number,
-  payload: Omit<AdminSubscriptionInput, "platform" | "handle">,
+  payload: Omit<AdminSubscriptionInput, "platform" | "handle" | "accountId">,
 ): Promise<AdminSubscription> {
   const json = await sendJson(`/api/admin/subscriptions/${id}`, {
     method: "PATCH",

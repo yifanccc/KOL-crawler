@@ -22,6 +22,7 @@ import {
   updateAdminSubscription,
 } from "@/lib/api";
 import { CollectorHealthCard } from "@/components/CollectorHealthCard";
+import { platformLabel, requiresAccountId } from "@/lib/platforms";
 import type { AdminConfigOptions, AdminSubscription, Asset, Signal } from "@/lib/types";
 
 const marketLabels: Record<string, string> = {
@@ -36,6 +37,7 @@ const marketLabels: Record<string, string> = {
 interface SubscriptionForm {
   platform: string;
   handle: string;
+  accountId: string;
   intervalMinutes: string;
   markets: string[];
   systemPrompt: string;
@@ -50,6 +52,7 @@ function newForm(options: AdminConfigOptions): SubscriptionForm {
   return {
     platform: options.platforms.includes("x") ? "x" : options.platforms[0] || "x",
     handle: "",
+    accountId: "",
     intervalMinutes: String(options.defaultIntervalMinutes),
     markets: [...options.markets],
     systemPrompt: options.defaultSystemPrompt,
@@ -65,6 +68,7 @@ function subscriptionForm(subscription: AdminSubscription): SubscriptionForm {
   return {
     platform: subscription.platform,
     handle: subscription.handle,
+    accountId: subscription.accountId || "",
     intervalMinutes: String(subscription.intervalMinutes),
     markets: subscription.markets,
     systemPrompt: subscription.systemPrompt || subscription.effectiveSystemPrompt,
@@ -167,7 +171,9 @@ export function AdminShell({
         throw new Error("Output schema 必须是 JSON 对象");
       }
       const common = {
-        intervalMinutes: Math.max(1, Number(form.intervalMinutes) || 10),
+        intervalMinutes: requiresAccountId(form.platform)
+          ? 10
+          : Math.max(1, Number(form.intervalMinutes) || 10),
         markets: form.markets,
         systemPrompt: form.systemPrompt,
         userPrompt: form.userPrompt,
@@ -178,7 +184,14 @@ export function AdminShell({
       };
       const saved = selectedId
         ? await updateAdminSubscription(selectedId, common)
-        : await createAdminSubscription({ ...common, platform: form.platform, handle: form.handle });
+        : await createAdminSubscription({
+            ...common,
+            platform: form.platform,
+            handle: form.handle,
+            ...(requiresAccountId(form.platform)
+              ? { accountId: form.accountId.trim() }
+              : {}),
+          });
       setSubscriptions((current) => {
         const exists = current.some((item) => item.id === saved.id);
         return exists ? current.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...current];
@@ -196,7 +209,7 @@ export function AdminShell({
   async function handleDelete() {
     if (!selectedId || !form || !options) return;
     const confirmed = window.confirm(
-      `删除 ${form.platform === "x" ? "X" : "Binance 广场"} @${form.handle} 的监控订阅？历史情报会保留。`,
+      `删除 ${platformLabel(form.platform)} ${form.handle} 的监控订阅？历史情报会保留。`,
     );
     if (!confirmed) return;
     setDeleting(true);
@@ -259,8 +272,16 @@ export function AdminShell({
                   type="button"
                   onClick={() => selectSubscription(subscription)}
                 >
-                  <span className={`source-dot source-dot-${subscription.platform}`} />
-                  <div><strong>@{subscription.handle}</strong><small>{subscription.platform === "x" ? "X" : "Binance 广场"} · {subscription.intervalMinutes} 分钟</small></div>
+                  <span className={`source-dot source-dot-${subscription.platform}`} aria-hidden="true" />
+                  <div>
+                    <strong>{subscription.platform === "x" ? `@${subscription.handle}` : subscription.handle}</strong>
+                    <small className="settings-subscription-meta">
+                      <span>{platformLabel(subscription.platform)}</span>
+                      {subscription.accountId ? <code>ID {subscription.accountId}</code> : null}
+                      <span>{subscription.intervalMinutes} 分钟</span>
+                      {subscription.visibility === "private" ? <em>私有</em> : null}
+                    </small>
+                  </div>
                   <Edit3 size={14} aria-hidden="true" />
                 </button>
               ))}
@@ -271,15 +292,42 @@ export function AdminShell({
             <div className="settings-section-title"><Bot size={17} aria-hidden="true" /><div><p className="eyebrow">{selectedId ? "Edit Subscription" : "New Subscription"}</p><h2>{selectedId ? `@${form.handle}` : "添加 KOL"}</h2></div></div>
 
             <div className="settings-basic-grid">
-              <label><span>平台</span><select disabled={Boolean(selectedId)} value={form.platform} onChange={(event) => setForm({ ...form, platform: event.target.value })}>{options.platforms.map((platform) => <option key={platform} value={platform}>{platform === "x" ? "X (Twitter)" : "Binance 广场"}</option>)}</select></label>
-              <label><span>KOL handle</span><input disabled={Boolean(selectedId)} required value={form.handle} onChange={(event) => setForm({ ...form, handle: event.target.value })} placeholder="senerity" /></label>
-              <label><span>抓取间隔（分钟）</span><input min="1" type="number" value={form.intervalMinutes} onChange={(event) => setForm({ ...form, intervalMinutes: event.target.value })} /></label>
+              <label><span>平台</span><select disabled={Boolean(selectedId)} value={form.platform} onChange={(event) => {
+                const platform = event.target.value;
+                setForm({
+                  ...form,
+                  platform,
+                  accountId: "",
+                  intervalMinutes: requiresAccountId(platform) ? "10" : form.intervalMinutes,
+                });
+              }}>{options.platforms.map((platform) => <option key={platform} value={platform}>{platformLabel(platform)}</option>)}</select></label>
+              <label><span>{requiresAccountId(form.platform) ? "KOL 昵称" : "KOL handle"}</span><input disabled={Boolean(selectedId)} required value={form.handle} onChange={(event) => setForm({ ...form, handle: event.target.value })} placeholder={requiresAccountId(form.platform) ? "熬鹰资本" : "senerity"} /></label>
+              {requiresAccountId(form.platform) ? (
+                <label>
+                  <span>Portfolio ID</span>
+                  <input
+                    disabled={Boolean(selectedId)}
+                    inputMode="numeric"
+                    pattern="[0-9]{8,32}"
+                    required
+                    value={form.accountId}
+                    onChange={(event) => setForm({ ...form, accountId: event.target.value })}
+                    placeholder="5075281354358777856"
+                  />
+                </label>
+              ) : null}
+              <label><span>抓取间隔（分钟）</span><input disabled={requiresAccountId(form.platform)} min="1" type="number" value={form.intervalMinutes} onChange={(event) => setForm({ ...form, intervalMinutes: event.target.value })} /></label>
               <label className="settings-toggle"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /><span>启用监控</span></label>
             </div>
 
             <fieldset className="market-selector"><legend>关注市场</legend><div>{options.markets.map((market) => <label className={form.markets.includes(market) ? "selected" : ""} key={market}><input type="checkbox" checked={form.markets.includes(market)} onChange={() => toggleMarket(market)} /><span>{marketLabels[market] || market}</span></label>)}</div></fieldset>
 
             <div className="prompt-editor">
+              {requiresAccountId(form.platform) ? (
+                <p className="trade-prompt-note" role="note">
+                  交易动作、数量与推测持仓使用确定性规则解析，不调用模型；以下 prompt 仅保留为订阅配置。
+                </p>
+              ) : null}
               <label><span>System prompt</span><textarea value={form.systemPrompt} onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })} /></label>
               <label><span>User prompt</span><textarea value={form.userPrompt} onChange={(event) => setForm({ ...form, userPrompt: event.target.value })} /></label>
               <label><span>Output schema</span><textarea className="schema-editor" spellCheck={false} value={form.outputSchema} onChange={(event) => setForm({ ...form, outputSchema: event.target.value })} /></label>

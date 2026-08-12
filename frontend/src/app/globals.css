@@ -2393,8 +2393,33 @@ button.tag-badge {
 }
 
 .source-dot-binance_square,
+.source-dot-binance_copy,
 .source-dot-binance {
   background: #f3ba2f;
+}
+
+.settings-subscription-list .settings-subscription-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 7px;
+  align-items: center;
+}
+
+.settings-subscription-list .settings-subscription-meta code {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--text);
+  font-size: 0.69rem;
+  text-overflow: ellipsis;
+}
+
+.settings-subscription-list .settings-subscription-meta em {
+  padding: 1px 5px;
+  border: 1px solid rgba(243, 186, 47, 0.42);
+  border-radius: var(--radius-sm);
+  color: #f3ba2f;
+  font-size: 0.66rem;
+  font-style: normal;
 }
 
 .settings-basic-grid {
@@ -2498,6 +2523,16 @@ button.tag-badge {
 .prompt-editor {
   display: grid;
   gap: 10px;
+}
+
+.trade-prompt-note {
+  margin: 0;
+  padding: 9px 10px;
+  border-left: 2px solid #f3ba2f;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: rgba(243, 186, 47, 0.07);
 }
 
 .prompt-editor textarea {

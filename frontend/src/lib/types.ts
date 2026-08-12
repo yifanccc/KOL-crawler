@@ -77,6 +77,8 @@ export interface AdminSubscription {
   id: number;
   platform: string;
   handle: string;
+  accountId?: string | null;
+  visibility: "public" | "private";
   intervalMinutes: number;
   enabled: boolean;
   checkpoint?: string | null;
