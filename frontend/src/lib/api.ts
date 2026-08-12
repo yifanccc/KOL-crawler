@@ -234,9 +234,14 @@ export function buildSignalQuery(params: SignalQuery = {}): string {
   return search.toString();
 }
 
-export async function fetchSignalPage(params: SignalQuery = {}): Promise<SignalPage> {
-  const query = buildSignalQuery(params);
-  const json = await getJson(`/api/signals${query ? `?${query}` : ""}`);
+export function signalEndpoint(scope: "regular" | "private"): string {
+  return scope === "private" ? "/api/admin/signals" : "/api/signals";
+}
+
+export function normalizeSignalPage(
+  json: unknown,
+  params: SignalQuery = {},
+): SignalPage {
   const items = normalizeItems(json).map(normalizeSignal);
   const source = isRecord(json) ? json : {};
   const total = numberValue(source.total) ?? items.length;
@@ -250,6 +255,22 @@ export async function fetchSignalPage(params: SignalQuery = {}): Promise<SignalP
     limit: numberValue(source.limit) ?? params.limit ?? 100,
     offset: numberValue(source.offset) ?? params.offset ?? 0,
   };
+}
+
+export async function fetchSignalPage(params: SignalQuery = {}): Promise<SignalPage> {
+  const query = buildSignalQuery(params);
+  const endpoint = signalEndpoint("regular");
+  const json = await getJson(`${endpoint}${query ? `?${query}` : ""}`);
+  return normalizeSignalPage(json, params);
+}
+
+export async function fetchPrivateSignalPage(
+  params: SignalQuery = {},
+): Promise<SignalPage> {
+  const query = buildSignalQuery(params);
+  const endpoint = signalEndpoint("private");
+  const json = await getJson(`${endpoint}${query ? `?${query}` : ""}`);
+  return normalizeSignalPage(json, params);
 }
 
 export async function fetchSignals(params: SignalQuery = {}): Promise<Signal[]> {

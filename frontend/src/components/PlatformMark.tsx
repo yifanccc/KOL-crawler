@@ -1,10 +1,12 @@
 "use client";
 
+import { platformLabel } from "@/lib/platforms";
+
 export function PlatformMark({ platform, withLabel = false }: { platform: string; withLabel?: boolean }) {
   const normalized = platform.toLowerCase();
   const isX = normalized === "x" || normalized === "twitter";
   const isBinance = normalized.includes("binance");
-  const label = isX ? "X" : isBinance ? "Binance Square" : platform;
+  const label = platformLabel(normalized);
   const mark = isX ? "X" : isBinance ? "B" : platform.slice(0, 1).toUpperCase();
 
   return (

@@ -39,24 +39,37 @@ export function FeedCard({
   signal,
   onSymbolSelect,
   onTagSelect,
+  kolHref,
 }: {
   signal: Signal;
   onSymbolSelect: (symbol: string) => void;
   onTagSelect: (tag: string) => void;
+  kolHref?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const importance = Math.max(1, Math.min(5, signal.importance));
+  const resolvedKolHref = kolHref === undefined
+    ? `/kols/${encodeURIComponent(signal.kol.id)}`
+    : kolHref;
 
   return (
     <article className={`feed-card feed-card-${signal.stance}`}>
       <header className="feed-card-header">
         <div className="feed-card-identity">
-          <Link href={`/kols/${encodeURIComponent(signal.kol.id)}`} aria-label={`查看 ${signal.kol.name}`}>
+          {resolvedKolHref ? (
+            <Link href={resolvedKolHref} aria-label={`查看 ${signal.kol.name}`}>
+              <KolAvatar kol={signal.kol} platform={signal.platform} size={34} />
+            </Link>
+          ) : (
             <KolAvatar kol={signal.kol} platform={signal.platform} size={34} />
-          </Link>
+          )}
           <div className="feed-card-source">
             <div>
-              <Link href={`/kols/${encodeURIComponent(signal.kol.id)}`}>{signal.kol.name}</Link>
+              {resolvedKolHref ? (
+                <Link href={resolvedKolHref}>{signal.kol.name}</Link>
+              ) : (
+                <strong className="feed-card-kol-name">{signal.kol.name}</strong>
+              )}
               {signal.kol.handle ? <span>@{signal.kol.handle.replace(/^@/, "")}</span> : null}
             </div>
             <div>

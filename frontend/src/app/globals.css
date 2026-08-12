@@ -563,6 +563,12 @@ button.stat-card {
   font-weight: 800;
 }
 
+.feed-card-kol-name {
+  color: var(--text-strong);
+  font-size: inherit;
+  font-weight: 800;
+}
+
 .feed-card-source span,
 .feed-card-source time {
   display: inline-flex;
@@ -2279,6 +2285,21 @@ button.tag-badge {
   background: var(--cyan-soft);
 }
 
+.settings-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.private-signal-description {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .settings-workspace {
   display: grid;
   grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
@@ -2690,6 +2711,15 @@ button.tag-badge {
   .settings-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .settings-header-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .settings-header-actions > * {
+    flex: 1 1 auto;
   }
 
   .settings-new-button,

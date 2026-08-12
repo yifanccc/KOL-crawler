@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Activity,
   BellRing,
   Bot,
   Database,
@@ -243,9 +244,14 @@ export function AdminShell({
           <p className="eyebrow">Monitor Settings</p>
           <h1>KOL 监控与模型配置</h1>
         </div>
-        <button type="button" className="settings-new-button" onClick={startNew} disabled={!options}>
-          <Plus size={16} aria-hidden="true" />新建订阅
-        </button>
+        <div className="settings-header-actions">
+          <Link className="settings-new-button" href="/admin/signals">
+            <Activity size={16} aria-hidden="true" />私有交易信号
+          </Link>
+          <button type="button" className="settings-new-button" onClick={startNew} disabled={!options}>
+            <Plus size={16} aria-hidden="true" />新建订阅
+          </button>
+        </div>
       </header>
 
       {error || settingsError ? <div className="state-panel error">{error || settingsError}</div> : null}
