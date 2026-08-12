@@ -28,6 +28,29 @@ def test_first_trade_fetch_builds_baseline_without_outbox(tmp_path) -> None:
     assert position.quantity == Decimal("0.10")
 
 
+def test_trade_baseline_exposes_current_position_snapshots(tmp_path) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    store.record_trade_fetch(
+        7,
+        trade_target(),
+        trade_result([sample_record("1", "OPEN", "LONG", "0.10")], "1"),
+    )
+
+    assert store.position_snapshots_for(7) == [
+        {
+            "symbol": "BTCUSDT",
+            "positionSide": "LONG",
+            "side": "LONG",
+            "quantity": "0.10",
+            "confidence": "HIGH",
+            "status": "ACTIVE",
+            "asOfEventTime": "2026-08-09T01:01:00+00:00",
+            "staleSince": None,
+            "updatedAt": "2026-08-09T02:00:00+00:00",
+        }
+    ]
+
+
 def test_second_trade_fetch_is_atomic_idempotent_and_survives_restart(tmp_path) -> None:
     path = tmp_path / "collector.sqlite3"
     store = CollectorStore(path)

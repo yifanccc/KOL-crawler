@@ -4,6 +4,7 @@ import type {
   Asset,
   CollectorHealth,
   Kol,
+  PositionSnapshot,
   Signal,
   SignalAsset,
   SignalPage,
@@ -290,6 +291,52 @@ export async function fetchAssets(): Promise<Asset[]> {
 export async function fetchCollectorHealth(): Promise<CollectorHealth | null> {
   const json = await getJson("/api/collector-health");
   return isRecord(json) ? normalizeCollectorHealth(json.item) : null;
+}
+
+export function normalizePositions(value: unknown): PositionSnapshot[] {
+  return normalizeItems(value).flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const kol = isRecord(item.kol) ? item.kol : {};
+    const symbol = text(item.symbol);
+    const updatedAt = text(item.updatedAt);
+    if (!symbol || !updatedAt) return [];
+    return [
+      {
+        subscriptionId: numberValue(item.subscriptionId) ?? 0,
+        kolId: idText(kol.id),
+        kolName: text(kol.displayName, "未知 KOL"),
+        platform: text(item.platform),
+        accountId: text(item.accountId),
+        symbol,
+        positionSide: ["LONG", "SHORT", "UNKNOWN"].includes(
+          text(item.positionSide),
+        )
+          ? (text(item.positionSide) as PositionSnapshot["positionSide"])
+          : "UNKNOWN",
+        side: ["LONG", "SHORT", "FLAT", "UNKNOWN"].includes(text(item.side))
+          ? (text(item.side) as PositionSnapshot["side"])
+          : "UNKNOWN",
+        quantity: text(item.quantity) || undefined,
+        confidence: ["HIGH", "MEDIUM", "LOW", "UNKNOWN"].includes(
+          text(item.confidence),
+        )
+          ? (text(item.confidence) as PositionSnapshot["confidence"])
+          : "UNKNOWN",
+        status: ["ACTIVE", "FLAT", "UNKNOWN", "STALE"].includes(
+          text(item.status),
+        )
+          ? (text(item.status) as PositionSnapshot["status"])
+          : "UNKNOWN",
+        asOfEventTime: text(item.asOfEventTime) || undefined,
+        staleSince: text(item.staleSince) || undefined,
+        updatedAt,
+      },
+    ];
+  });
+}
+
+export async function fetchPositions(): Promise<PositionSnapshot[]> {
+  return normalizePositions(await getJson("/api/positions"));
 }
 
 export async function login(username: string, password: string): Promise<void> {

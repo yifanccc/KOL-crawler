@@ -218,6 +218,16 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
                 "intervalMinutes": 1,
             },
         )
+        invalid_prompt = client.post(
+            "/api/admin/subscriptions",
+            headers=headers,
+            json={
+                "platform": "binance_copy",
+                "handle": "不应使用提示词",
+                "accountId": "5075281354358777857",
+                "systemPrompt": "交易订阅不应配置模型",
+            },
+        )
         created = client.post(
             "/api/admin/subscriptions",
             headers=headers,
@@ -249,24 +259,40 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
             headers=headers,
             json={"accountId": "11111111"},
         )
+        mutable_prompt = client.patch(
+            f"/api/admin/subscriptions/{item['id']}",
+            headers=headers,
+            json={"systemPrompt": "交易订阅不应配置模型"},
+        )
     with SessionLocal() as session:
         notification_rule = session.scalar(
             select(NotificationRule).where(
                 NotificationRule.subscription_id == item["id"]
             )
         )
+        stored_subscription = session.get(Subscription, item["id"])
 
     assert missing_account.status_code == 422
     assert invalid_account.status_code == 422
     assert invalid_interval.status_code == 422
+    assert invalid_prompt.status_code == 422
     assert item["accountId"] == "5075281354358777856"
     assert item["visibility"] == "private"
     assert item["intervalMinutes"] == 10
+    assert item["systemPrompt"] is None
+    assert item["userPrompt"] is None
+    assert item["outputSchema"] is None
+    assert item["effectiveSystemPrompt"] == ""
+    assert item["effectiveUserPrompt"] == ""
+    assert item["effectiveOutputSchema"] == {}
+    assert stored_subscription is not None
+    assert stored_subscription.model_config_id is None
     assert notification_rule is not None
     assert notification_rule.min_confidence == "低"
     assert duplicate.status_code == 409
     assert mutable_interval.status_code == 422
     assert mutable_account.status_code == 422
+    assert mutable_prompt.status_code == 422
 
 
 def test_private_trade_data_only_appears_in_admin_scope() -> None:

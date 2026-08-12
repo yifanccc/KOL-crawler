@@ -121,3 +121,20 @@ export interface CollectorHealth {
   outboxPending: number;
   lastSeenAt: string;
 }
+
+export interface PositionSnapshot {
+  subscriptionId: number;
+  kolId: string;
+  kolName: string;
+  platform: string;
+  accountId: string;
+  symbol: string;
+  positionSide: "LONG" | "SHORT" | "UNKNOWN";
+  side: "LONG" | "SHORT" | "FLAT" | "UNKNOWN";
+  quantity?: string;
+  confidence: "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
+  status: "ACTIVE" | "FLAT" | "UNKNOWN" | "STALE";
+  asOfEventTime?: string;
+  staleSince?: string;
+  updatedAt: string;
+}

@@ -168,6 +168,15 @@ def run_schema_migrations(engine: Engine) -> None:
                         "WHERE platform = 'binance_copy'"
                     )
                 )
+                connection.execute(
+                    text(
+                        "UPDATE subscriptions SET prompt = NULL, system_prompt = NULL, "
+                        "user_prompt = NULL, output_schema_json = NULL, "
+                        "prompt_version = NULL, model_config_id = NULL, "
+                        "markets_json = '[\"crypto\"]' "
+                        "WHERE platform = 'binance_copy'"
+                    )
+                )
                 has_identity_constraint = any(
                     set(item["column_names"] or []) == subscription_identity
                     for item in subscription_inspector.get_unique_constraints("subscriptions")

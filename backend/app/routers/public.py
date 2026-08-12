@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -5,13 +6,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import KolProfile, Subscription
+from app.models import KolProfile, PositionEstimate, Subscription
 from app.routers.auth import require_authenticated
 from app.services.collector_health import collector_health_payload
 from app.services.signal_feed import signal_detail, signal_page, visible_public_assets
 
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_authenticated)])
+
+
+def _utc_text(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 @router.get("/signals")
@@ -83,6 +92,46 @@ def list_kols(db: Session = Depends(get_db)) -> dict:
 @router.get("/collector-health")
 def collector_health(db: Session = Depends(get_db)) -> dict:
     return {"item": collector_health_payload(db)}
+
+
+@router.get("/positions")
+def list_positions(db: Session = Depends(get_db)) -> dict:
+    rows = db.execute(
+        select(PositionEstimate, Subscription, KolProfile)
+        .join(
+            Subscription,
+            Subscription.id == PositionEstimate.subscription_id,
+        )
+        .join(KolProfile, KolProfile.id == Subscription.kol_profile_id)
+        .where(
+            Subscription.deleted_at.is_(None),
+            Subscription.visibility == "private",
+        )
+        .order_by(
+            PositionEstimate.symbol,
+            PositionEstimate.position_side,
+        )
+    ).all()
+    return {
+        "items": [
+            {
+                "subscriptionId": subscription.id,
+                "kol": {"id": kol.id, "displayName": kol.display_name},
+                "platform": subscription.platform,
+                "accountId": subscription.platform_account_id,
+                "symbol": position.symbol,
+                "positionSide": position.position_side,
+                "side": position.side,
+                "quantity": position.quantity,
+                "confidence": position.confidence,
+                "status": position.status,
+                "asOfEventTime": _utc_text(position.as_of_event_time),
+                "staleSince": _utc_text(position.stale_since),
+                "updatedAt": _utc_text(position.source_updated_at),
+            }
+            for position, subscription, kol in rows
+        ]
+    }
 
 
 @router.get("/assets")

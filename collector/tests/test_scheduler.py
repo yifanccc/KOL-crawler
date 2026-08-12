@@ -14,9 +14,13 @@ from tests.trade_samples import checkpoint, sample_record
 class Api:
     def __init__(self):
         self.heartbeats = []
+        self.position_replacements = []
 
     def fetch_config(self): return {"agentId": "home", "pollSeconds": 60, "subscriptions": [{"id": 1, "platform": "x", "handle": "one", "intervalMinutes": 1, "enabled": True}, {"id": 2, "platform": "x", "handle": "two", "intervalMinutes": 2, "enabled": True}]}
     def upload(self, agent_id, posts): return {"items": [{"externalId": post["externalId"], "status": "accepted"} for post in posts]}
+    def replace_positions(self, agent_id, subscription_id, positions):
+        self.position_replacements.append((agent_id, subscription_id, positions))
+        return {"count": len(positions)}
     def heartbeat(self, payload): self.heartbeats.append(payload); return {}
 
 
@@ -323,8 +327,9 @@ class TradeProvider:
 
 def test_scheduler_creates_trade_baseline_with_fixed_account_target(tmp_path, capsys):
     provider = TradeProvider()
+    api = TradeApi()
     store = CollectorStore(tmp_path / "db.sqlite")
-    scheduler = CollectorScheduler(store, TradeApi(), {"binance_copy": provider})
+    scheduler = CollectorScheduler(store, api, {"binance_copy": provider})
     now = datetime(2026, 8, 9, tzinfo=UTC)
 
     assert scheduler.run_once(now) == [21]
@@ -334,6 +339,9 @@ def test_scheduler_creates_trade_baseline_with_fixed_account_target(tmp_path, ca
     ]
     assert store.pending_posts() == []
     assert store.checkpoint_for(21) == checkpoint("1")
+    assert api.position_replacements[0][0:2] == ("home", 21)
+    assert api.position_replacements[0][2][0]["symbol"] == "BTCUSDT"
+    assert api.position_replacements[0][2][0]["status"] == "ACTIVE"
     assert scheduler.next_check[21] == now + timedelta(minutes=10)
     assert "status=baseline_created" in capsys.readouterr().out
 

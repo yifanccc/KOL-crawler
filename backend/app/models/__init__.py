@@ -4,6 +4,7 @@ from app.models.crawl_run import CrawlRun
 from app.models.kol import KolProfile
 from app.models.model_config import ModelConfig
 from app.models.notification import NotificationEvent, NotificationRule
+from app.models.position_estimate import PositionEstimate
 from app.models.raw_post import RawPost
 from app.models.signal import Signal
 from app.models.subscription import Subscription
@@ -17,6 +18,7 @@ __all__ = [
     "ModelConfig",
     "NotificationEvent",
     "NotificationRule",
+    "PositionEstimate",
     "RawPost",
     "Signal",
     "SignalAsset",

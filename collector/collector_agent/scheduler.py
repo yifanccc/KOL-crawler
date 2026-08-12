@@ -75,6 +75,7 @@ class CollectorScheduler:
                 self._log_subscription(now, subscription, "skipped", reason="provider_missing")
                 continue
             self.active.add(subscription_id)
+            sync_trade_positions = False
             try:
                 checkpoint_before = self.store.checkpoint_for(subscription_id)
                 limit = (
@@ -94,6 +95,9 @@ class CollectorScheduler:
                     self.provider_failures.pop(subscription["platform"], None)
                     if subscription["platform"] in TRADE_PLATFORMS:
                         self.store.mark_trade_positions_stale(subscription_id, now)
+                        sync_trade_positions = bool(
+                            self.store.position_snapshots_for(subscription_id)
+                        )
                     self._log_subscription(
                         now,
                         subscription,
@@ -113,6 +117,7 @@ class CollectorScheduler:
                 elif result.kind == "trade_records":
                     fetched = len(result.records)
                     self.store.record_trade_fetch(subscription_id, target, result)
+                    sync_trade_positions = True
                     status = (
                         "baseline_created" if checkpoint_before is None else "success"
                     )
@@ -123,6 +128,9 @@ class CollectorScheduler:
                 self._log_subscription(now, subscription, status, fetched=fetched)
             except TradeHistoryGap as exc:
                 self.store.mark_trade_positions_unknown(subscription_id, now)
+                sync_trade_positions = bool(
+                    self.store.position_snapshots_for(subscription_id)
+                )
                 self.provider_failures.pop(subscription["platform"], None)
                 self._log_subscription(
                     now,
@@ -133,6 +141,9 @@ class CollectorScheduler:
             except Exception as exc:
                 if subscription["platform"] in TRADE_PLATFORMS:
                     self.store.mark_trade_positions_stale(subscription_id, now)
+                    sync_trade_positions = bool(
+                        self.store.position_snapshots_for(subscription_id)
+                    )
                 self.provider_failures[subscription["platform"]] = "Provider fetch failed"
                 self._log_subscription(
                     now,
@@ -141,6 +152,24 @@ class CollectorScheduler:
                     error=type(exc).__name__,
                 )
             finally:
+                if sync_trade_positions:
+                    try:
+                        self.api.replace_positions(
+                            config["agentId"],
+                            subscription_id,
+                            self.store.position_snapshots_for(subscription_id),
+                        )
+                    except Exception as exc:
+                        self.provider_failures[subscription["platform"]] = (
+                            "Position snapshot upload failed"
+                        )
+                        self._log_subscription(
+                            now,
+                            subscription,
+                            "failed",
+                            error=type(exc).__name__,
+                            operation="position_upload",
+                        )
                 self.next_check[subscription_id] = now + timedelta(minutes=max(1, subscription["intervalMinutes"]))
                 self.active.remove(subscription_id)
         pending = self.store.pending_posts()

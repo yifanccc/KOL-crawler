@@ -68,6 +68,28 @@ class CollectorStore:
     ) -> PositionEstimate | None:
         return position_for(self.connection, subscription_id, symbol, position_side)
 
+    def position_snapshots_for(self, subscription_id: int) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT symbol, position_side, side, quantity, confidence, status, "
+            "as_of_event_time, stale_since, updated_at FROM position_estimates "
+            "WHERE subscription_id = ? ORDER BY symbol, position_side",
+            (subscription_id,),
+        ).fetchall()
+        return [
+            {
+                "symbol": row["symbol"],
+                "positionSide": row["position_side"],
+                "side": row["side"],
+                "quantity": row["quantity"],
+                "confidence": row["confidence"],
+                "status": row["status"],
+                "asOfEventTime": row["as_of_event_time"],
+                "staleSince": row["stale_since"],
+                "updatedAt": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def pending_posts(self, limit: int = 100) -> list[OutboxPost]:
         rows = self.connection.execute("SELECT id, subscription_id, external_id, payload_json FROM outbox_posts WHERE status = 'pending' ORDER BY id LIMIT ?", (limit,)).fetchall()
         return [OutboxPost(id=row["id"], subscription_id=row["subscription_id"], external_id=row["external_id"], payload=json.loads(row["payload_json"])) for row in rows]

@@ -78,6 +78,14 @@ class SubscriptionCreate(BaseModel):
                 raise ValueError("accountId is required for private trade platforms")
             if self.intervalMinutes != DEFAULT_MONITOR_INTERVAL_MINUTES:
                 raise ValueError("private trade platforms require a 10 minute interval")
+            prompt_fields = {
+                "prompt",
+                "systemPrompt",
+                "userPrompt",
+                "outputSchema",
+            }
+            if prompt_fields & self.model_fields_set:
+                raise ValueError("private trade platforms do not use prompts")
         elif self.accountId is not None:
             raise ValueError("accountId is only valid for private trade platforms")
         return self
@@ -203,6 +211,7 @@ def _subscription_payload(db: Session, subscription: Subscription) -> dict:
         markets = json.loads(subscription.markets_json) if subscription.markets_json else list(ALL_MARKETS)
     except json.JSONDecodeError:
         markets = list(ALL_MARKETS)
+    is_trade = subscription.platform in TRADE_PLATFORMS
     return {
         "id": subscription.id,
         "platform": subscription.platform,
@@ -212,15 +221,23 @@ def _subscription_payload(db: Session, subscription: Subscription) -> dict:
         "intervalMinutes": subscription.interval_minutes,
         "enabled": subscription.enabled,
         "checkpoint": subscription.checkpoint,
-        "prompt": subscription.prompt,
-        "systemPrompt": subscription.system_prompt,
-        "userPrompt": subscription.user_prompt,
-        "outputSchema": output_schema,
-        "markets": markets,
-        "promptVersion": subscription.prompt_version or "default-v2",
-        "effectiveSystemPrompt": subscription.system_prompt or subscription.prompt or DEFAULT_SYSTEM_PROMPT,
-        "effectiveUserPrompt": subscription.user_prompt or DEFAULT_USER_PROMPT,
-        "effectiveOutputSchema": output_schema or DEFAULT_OUTPUT_SCHEMA,
+        "prompt": None if is_trade else subscription.prompt,
+        "systemPrompt": None if is_trade else subscription.system_prompt,
+        "userPrompt": None if is_trade else subscription.user_prompt,
+        "outputSchema": None if is_trade else output_schema,
+        "markets": ["crypto"] if is_trade else markets,
+        "promptVersion": None
+        if is_trade
+        else subscription.prompt_version or "default-v2",
+        "effectiveSystemPrompt": ""
+        if is_trade
+        else subscription.system_prompt or subscription.prompt or DEFAULT_SYSTEM_PROMPT,
+        "effectiveUserPrompt": ""
+        if is_trade
+        else subscription.user_prompt or DEFAULT_USER_PROMPT,
+        "effectiveOutputSchema": {}
+        if is_trade
+        else output_schema or DEFAULT_OUTPUT_SCHEMA,
         "ntfyServer": rule.ntfy_server if rule else None,
         "ntfyTopic": rule.ntfy_topic if rule else None,
         "lastSuccessAt": subscription.last_success_at.isoformat()
@@ -266,9 +283,13 @@ def create_subscription(
         db.add(kol)
         db.flush()
 
-    system_prompt = payload.systemPrompt or DEFAULT_SYSTEM_PROMPT
-    user_prompt = payload.userPrompt or DEFAULT_USER_PROMPT
-    output_schema = payload.outputSchema or DEFAULT_OUTPUT_SCHEMA
+    is_trade = payload.platform in TRADE_PLATFORMS
+    system_prompt = None if is_trade else payload.systemPrompt or DEFAULT_SYSTEM_PROMPT
+    user_prompt = None if is_trade else payload.userPrompt or DEFAULT_USER_PROMPT
+    output_schema = None if is_trade else payload.outputSchema or DEFAULT_OUTPUT_SCHEMA
+    markets = ["crypto"] if is_trade else payload.markets
+    prompt_version = None if is_trade else "custom-v1"
+    model_config_id = None if is_trade else _default_model_config(db).id
 
     if existing is not None:
         existing.kol_profile_id = kol.id
@@ -278,13 +299,15 @@ def create_subscription(
             "private" if payload.platform in TRADE_PLATFORMS else "public"
         )
         existing.interval_minutes = payload.intervalMinutes
-        existing.prompt = payload.prompt
+        existing.prompt = None if is_trade else payload.prompt
         existing.system_prompt = system_prompt
         existing.user_prompt = user_prompt
-        existing.output_schema_json = json.dumps(output_schema, ensure_ascii=False)
-        existing.markets_json = json.dumps(payload.markets, ensure_ascii=False)
-        existing.prompt_version = "custom-v1"
-        existing.model_config_id = _default_model_config(db).id
+        existing.output_schema_json = (
+            json.dumps(output_schema, ensure_ascii=False) if output_schema else None
+        )
+        existing.markets_json = json.dumps(markets, ensure_ascii=False)
+        existing.prompt_version = prompt_version
+        existing.model_config_id = model_config_id
         existing.enabled = True
         existing.deleted_at = None
         rule = db.scalar(
@@ -310,13 +333,15 @@ def create_subscription(
         platform_handle=handle,
         visibility="private" if payload.platform in TRADE_PLATFORMS else "public",
         interval_minutes=payload.intervalMinutes,
-        prompt=payload.prompt,
+        prompt=None if is_trade else payload.prompt,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        output_schema_json=json.dumps(output_schema, ensure_ascii=False),
-        markets_json=json.dumps(payload.markets, ensure_ascii=False),
-        prompt_version="custom-v1",
-        model_config_id=_default_model_config(db).id,
+        output_schema_json=(
+            json.dumps(output_schema, ensure_ascii=False) if output_schema else None
+        ),
+        markets_json=json.dumps(markets, ensure_ascii=False),
+        prompt_version=prompt_version,
+        model_config_id=model_config_id,
         enabled=True,
     )
     db.add(subscription)
@@ -347,6 +372,20 @@ def update_subscription(
     subscription = db.get(Subscription, subscription_id)
     if subscription is None or subscription.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Subscription not found")
+    if subscription.platform in TRADE_PLATFORMS:
+        prompt_fields = {"prompt", "systemPrompt", "userPrompt", "outputSchema"}
+        if prompt_fields & payload.model_fields_set:
+            raise HTTPException(
+                status_code=422,
+                detail="private trade platforms do not use prompts",
+            )
+        subscription.prompt = None
+        subscription.system_prompt = None
+        subscription.user_prompt = None
+        subscription.output_schema_json = None
+        subscription.prompt_version = None
+        subscription.model_config_id = None
+        subscription.markets_json = json.dumps(["crypto"], ensure_ascii=False)
     if payload.intervalMinutes is not None:
         if (
             subscription.platform in TRADE_PLATFORMS

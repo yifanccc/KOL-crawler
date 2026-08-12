@@ -17,6 +17,17 @@ class CollectorApiClient:
         response.raise_for_status()
         return response.json()
 
+    def replace_positions(
+        self, agent_id: str, subscription_id: int, positions: list[dict]
+    ) -> dict:
+        response = self.http.put(
+            f"{self.base_url}/api/v1/collector/subscriptions/{subscription_id}/positions",
+            headers=self.headers,
+            json={"agentId": agent_id, "positions": positions},
+        )
+        response.raise_for_status()
+        return response.json()
+
     def heartbeat(self, payload: dict) -> dict:
         response = self.http.post(f"{self.base_url}/api/v1/collector/heartbeat", headers=self.headers, json=payload)
         response.raise_for_status()
