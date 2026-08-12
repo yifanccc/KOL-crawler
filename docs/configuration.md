@@ -124,11 +124,23 @@ docker compose up -d --force-recreate --no-deps api
 
 Binance 订阅填写个人主页最后一段 slug，例如 `https://www.binance.com/zh-CN/square/profile/btc7873` 应填写 `btc7873`，不能填写展示名、纯数字用户 ID 或整条 URL。Binance 没有公开的他人帖子读取 API，collector 会在本机启动无头 Chrome，获取网页请求所需的指纹头后读取用户资料和帖子；因此 Binance 采集要求本机安装 Chrome/Chromium。
 
+上段只适用于 `binance_square`。Binance Copy 交易订阅在 Admin 中选择 `Binance Copy`，填写展示名和固定数字 Portfolio ID；熬鹰资本使用 `5075281354358777856`。服务端会自动强制：
+
+- `platform=binance_copy`
+- `visibility=private`
+- `intervalMinutes=10`
+- `accountId` 为 8 至 32 位数字，创建后不可修改，并按平台与 ID 唯一
+- 通知最低置信度默认为“低”；普通 KOL 订阅仍默认为“中”
+
+Binance Copy provider 当前不需要额外环境变量、Chrome 会话或 Binance 登录凭据。它只读最近 100 条成交记录，并把 checkpoint、交易 ledger、推测仓位和待上传 Outbox 保存在 `COLLECTOR_DB_PATH` 指向的本机 SQLite。首轮仅建立基线；模型 Key、System prompt 和 User prompt 不参与交易数值解析。若内部 BAPI 后续增加访问门槛，应先让 provider health 降级并重新验证只读会话边界，不能把 Cookie 或 Authorization 写进 `.env`、数据库、日志或 Git。
+
 删除订阅是软删除：该平台/handle 不再出现在订阅和 KOL 列表，也不会继续下发给 collector，但已经保存的原帖和历史信号仍保留。
 
 Collector 停机后重启时会复用本机 SQLite checkpoint。X 与 Binance Square 都按 checkpoint 过滤，只把最近最多 `CATCHUP_FETCH_LIMIT` 条按旧到新写入 Outbox，并把 checkpoint 推进到本批最新帖子。超过上限的更老帖子会永久跳过；上传网络失败时帖子保留在 Outbox，不会因 checkpoint 已推进而丢失。修改该配置后需要重启 Collector。
 
 新增订阅的抓取间隔默认是 10 分钟。Admin 表单与创建 API 使用同一默认值；当前默认 System prompt、User prompt 和 Output Schema 是 2026-07-13 Serenity（`aleabitoreddit`）配置的固定快照。以后单独修改 Serenity 不会自动改变新增订阅默认值。
+
+交易订阅不是“默认 10 分钟”，而是固定 10 分钟；API 和 Admin 都拒绝其它间隔。实际抓取时间为该订阅上轮开始时间加 10 分钟，并受 `CONFIG_POLL_SECONDS` 调度循环粒度影响，不承诺严格整点。
 
 ## 哪些值本地可以不改
 

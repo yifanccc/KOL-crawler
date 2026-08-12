@@ -9,7 +9,7 @@ Date: 2026-08-09 / 2026-08-10 (Asia/Shanghai)
 | Binance Copy / 熬鹰资本 | `supported` | 支持每 10 分钟读取最近操作记录并推测持仓变化；首版必须保留本文中的 ID、分页和缺口限制。 |
 | OKX Orbit / 十老板 | `not_run` | 网页只提供动态和持仓快照；App 交易记录抓取需要新增手机代理/证书能力，等待单独授权。 |
 
-这里的 `supported` 只表示只读来源契约通过 POC，不表示 provider、生产调度或部署已经完成。
+这里的 `supported` 只表示只读来源契约通过 POC，不等同于生产上线。截至 2026-08-12，Binance provider、10 分钟调度、推测持仓、私有 Signal 和管理端页面已在专属分支完成本地实现与自动化验证，但尚未部署；OKX 仍不在运行范围。
 
 ## Safety Boundary
 

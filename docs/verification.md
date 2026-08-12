@@ -200,6 +200,19 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 
 北京时间 2026-07-20 23:28 的最终真实轮次中，Binance 与 5 个有效 X 订阅成功；`Jukanlosreve` 仍失败，独立 OpenCLI 命令明确返回 `Could not resolve @Jukanlosreve`，属于该订阅账号不可解析，未自动删除或推进 checkpoint。最终远端 heartbeat 为 overall `healthy`、Binance `healthy`、X `authenticated`、Outbox 0，launchd 进程持续运行。
 
+### Binance Copy 成交监控本地验收
+
+2026-08-12 在专属分支完成 Binance-only 本地验收，目标为熬鹰资本 Portfolio ID `5075281354358777856`；OKX 未注册 provider，也未进入运行范围。
+
+- Collector 全量 `50 passed`。四轮合成回归覆盖首轮基线无 Outbox、第二轮新增成交生成一条事件、第三轮重复保持幂等、第四轮访问失效保留 checkpoint 且仓位转为 `STALE`；重叠窗口缺口另有测试锁定为 `UNKNOWN`。
+- 隔离 API 容器后端全量 `88 passed`，只有 1 条既有 Starlette/httpx 弃用警告。端到端上传确认交易 payload 绕过 LLM，生成 `structuredStatus=deterministic` 的 private Signal 和一条 ntfy 事件；常规 `/api/signals` 为 0 条，管理端 `/api/admin/signals` 返回该事件。
+- 前端 Node 测试 `12 passed`，TypeScript `--noEmit` 和 Next.js 生产构建通过，构建包含 `/admin/signals`。Node 只报告既有的 package module type 提示。
+- 使用隔离 SQLite API、临时 Chrome profile 和本地开发 Web 验证 `/admin/signals`：接口 200、控制台 error 0、失败响应 0；1440×1000 与 320×900 均无横向溢出，筛选在移动端收敛为单列，标题/空状态/焦点顺序和可访问名称正常。临时 profile、脚本和截图已移到废纸篓，没有复用用户打开的 Binance 会话。
+- 对固定 Binance host/path 执行一次无状态只读实源烟测，结果为 provider `healthy`、返回 100 条、生成 checkpoint、`history_complete=false`，记录 ID 与 revision 均为 64 位哈希；命令未打印成交字段，也未读取或保存 Cookie/Authorization。
+- 生产构建在隔离端口验证：未登录 `GET /icon.svg` 返回 200，未登录 `GET /admin/signals` 仍返回 307 并跳转 `/login?next=%2Fadmin%2Fsignals`。
+
+本验收只证明代码、合成数据和已验证只读响应契约在本机可用，不代表已部署到生产。当前 Binance 首屏请求不发送或保存 Cookie/Authorization；应用仍将生成的数据强制标为 `private`。
+
 ## 外部前置条件
 
 - ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。

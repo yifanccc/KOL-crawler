@@ -415,3 +415,72 @@ def test_scheduler_marks_trade_position_unknown_when_overlap_has_a_gap(tmp_path)
     assert position.status == "UNKNOWN"
     assert position.quantity is None
     assert store.checkpoint_for(21) == checkpoint("1")
+
+
+class OfflineTradeApi(TradeApi):
+    def __init__(self):
+        super().__init__()
+        self.uploaded_batches: list[list[dict]] = []
+
+    def upload(self, agent_id, posts):
+        self.uploaded_batches.append(posts)
+        raise RuntimeError("backend unavailable")
+
+
+class SequencedTradeProvider(TradeProvider):
+    def __init__(self):
+        super().__init__()
+        self.round = 0
+        self._health = ProviderHealth("healthy")
+
+    def fetch(self, target, current_checkpoint, limit):
+        self.targets.append(target)
+        self.round += 1
+        first = sample_record("1", "OPEN", "LONG", "0.10")
+        if self.round == 1:
+            return TradeRecordFetchResult(
+                [first], checkpoint("1"), history_complete=False
+            )
+        second = sample_record("2", "INCREASE", "LONG", "0.05")
+        if self.round in {2, 3}:
+            return TradeRecordFetchResult(
+                [first, second], checkpoint("2"), history_complete=False
+            )
+        self._health = ProviderHealth("login_required", "read access unavailable")
+        return TradeRecordFetchResult(
+            [], current_checkpoint, history_complete=False
+        )
+
+
+def test_trade_scheduler_end_to_end_baseline_dedupes_and_marks_stale(tmp_path):
+    api = OfflineTradeApi()
+    provider = SequencedTradeProvider()
+    store = CollectorStore(tmp_path / "db.sqlite")
+    scheduler = CollectorScheduler(store, api, {"binance_copy": provider})
+    started_at = datetime(2026, 8, 9, tzinfo=UTC)
+
+    assert scheduler.run_once(started_at) == [21]
+    assert store.checkpoint_for(21) == checkpoint("1")
+    assert store.pending_posts() == []
+
+    assert scheduler.run_once(started_at + timedelta(minutes=10)) == [21]
+    pending_after_change = store.pending_posts()
+    assert len(pending_after_change) == 1
+    assert pending_after_change[0].external_id == "5075281354358777856:2:r1"
+    assert "熬鹰资本" not in pending_after_change[0].external_id
+    assert pending_after_change[0].payload["rawPayload"]["action"] == "ADD"
+    assert store.checkpoint_for(21) == checkpoint("2")
+
+    assert scheduler.run_once(started_at + timedelta(minutes=20)) == [21]
+    assert [post.id for post in store.pending_posts()] == [
+        pending_after_change[0].id
+    ]
+    assert store.checkpoint_for(21) == checkpoint("2")
+
+    assert scheduler.run_once(started_at + timedelta(minutes=30)) == []
+    assert store.checkpoint_for(21) == checkpoint("2")
+    position = store.position_for(21, "BTCUSDT", "LONG")
+    assert position is not None
+    assert position.status == "STALE"
+    assert position.quantity == Decimal("0.15")
+    assert len(store.pending_posts()) == 1
