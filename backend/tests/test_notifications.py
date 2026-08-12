@@ -143,6 +143,38 @@ def test_notification_title_never_falls_back_to_account_handle() -> None:
     assert message == "摘要：BTC 看多\n标的：BTC\n方向：多"
 
 
+def test_notification_uses_binance_copy_platform_label() -> None:
+    reset_database()
+    session = SessionLocal()
+    try:
+        raw_post = RawPost(
+            platform="binance_copy",
+            external_id="copy-trade",
+            author_name="熬鹰资本",
+            published_at=datetime(2026, 8, 9, tzinfo=UTC),
+            raw_text="BTCUSDT 减仓",
+        )
+        session.add(raw_post)
+        session.flush()
+        signal = Signal(
+            raw_post_id=raw_post.id,
+            actionable=True,
+            stance="neutral",
+            stance_cn="中性",
+            summary="BTCUSDT 减仓",
+            symbols_json='["BTCUSDT"]',
+            structured_status="deterministic",
+        )
+        session.add(signal)
+        session.flush()
+
+        title, _ = _format_notification(session, signal)
+    finally:
+        session.close()
+
+    assert title == "Binance Copy | 熬鹰资本 | 2026-08-09 08:00"
+
+
 def test_repeated_dispatch_creates_one_event_and_one_publish_call() -> None:
     reset_database()
     session = SessionLocal()

@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 from app.models import Asset, NotificationEvent, NotificationRule, RawPost, Signal, SignalAsset
 
 CONFIDENCE_RANK = {"低": 1, "中": 2, "高": 3, None: 0}
-PLATFORM_LABELS = {"x": "X", "binance_square": "Binance Square"}
+PLATFORM_LABELS = {
+    "x": "X",
+    "binance_square": "Binance Square",
+    "binance_copy": "Binance Copy",
+}
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 

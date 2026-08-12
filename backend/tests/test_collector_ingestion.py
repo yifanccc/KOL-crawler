@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -86,3 +88,80 @@ def test_collector_rejects_oversized_content_without_rolling_back_siblings() -> 
     assert [item["status"] for item in response.json()["items"]] == ["accepted", "invalid"]
     with SessionLocal() as session:
         assert [row.external_id for row in session.scalars(select(RawPost)).all()] == ["small"]
+
+
+def test_collector_trade_upload_uses_deterministic_analysis(monkeypatch) -> None:
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    account_id = "5075281354358777856"
+    with SessionLocal.begin() as session:
+        subscription = Subscription(
+            platform="binance_copy",
+            platform_account_id=account_id,
+            platform_handle="熬鹰资本",
+            visibility="private",
+            interval_minutes=10,
+        )
+        session.add(subscription)
+        session.flush()
+        subscription_id = subscription.id
+    payload = {
+        "schemaVersion": 1,
+        "platform": "binance_copy",
+        "accountId": account_id,
+        "sourceRecordId": "record-3",
+        "revision": "r1",
+        "action": "OPEN",
+        "effectiveAction": "INCREASE",
+        "symbol": "ETHUSDT",
+        "positionSide": "SHORT",
+        "quantity": "2.0",
+        "price": "3200.0",
+        "leverage": None,
+        "eventTime": "2026-08-09T04:00:00Z",
+        "positionAfter": {
+            "side": "SHORT",
+            "quantity": "2.0",
+            "confidence": "LOW",
+            "status": "ACTIVE",
+        },
+        "sourceRecord": {"orderUpdateTime": 1786248000000},
+    }
+    post = {
+        "subscriptionId": subscription_id,
+        "platform": "binance_copy",
+        "externalId": f"{account_id}:record-3:r1",
+        "authorHandle": "熬鹰资本",
+        "authorName": "熬鹰资本",
+        "publishedAt": payload["eventTime"],
+        "url": (
+            "https://www.binance.com/zh-CN/copy-trading/lead-details/"
+            f"{account_id}"
+        ),
+        "rawContent": "熬鹰资本 ETHUSDT 开仓 空头",
+        "rawPayload": payload,
+    }
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/collector/posts",
+            headers=HEADERS,
+            json={"agentId": "home-mac-01", "posts": [post]},
+        )
+    assert response.json()["items"] == [
+        {"externalId": post["externalId"], "status": "accepted"}
+    ]
+
+    structurer = Mock()
+    structurer.structure.side_effect = AssertionError("LLM must not run")
+    monkeypatch.setattr(
+        "app.services.analysis_queue.dispatch_notifications", lambda *_args: 0
+    )
+    with SessionLocal() as session:
+        assert process_pending_posts(session, structurer) == 1
+        signal = session.scalar(select(Signal))
+
+    structurer.structure.assert_not_called()
+    assert signal is not None
+    assert signal.stance == "bearish"
+    assert signal.actionable is True
+    assert signal.structured_status == "deterministic"
