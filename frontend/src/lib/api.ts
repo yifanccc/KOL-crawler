@@ -367,7 +367,7 @@ function normalizeAdminSubscription(value: unknown): AdminSubscription {
     userPrompt: text(source.userPrompt) || null,
     outputSchema: isRecord(source.outputSchema) ? source.outputSchema : null,
     markets: normalizeTags(source.markets),
-    promptVersion: text(source.promptVersion, "default-v2"),
+    promptVersion: text(source.promptVersion) || undefined,
     effectiveSystemPrompt: text(source.effectiveSystemPrompt),
     effectiveUserPrompt: text(source.effectiveUserPrompt),
     effectiveOutputSchema: isRecord(source.effectiveOutputSchema) ? source.effectiveOutputSchema : {},
@@ -410,6 +410,64 @@ export interface AdminSubscriptionInput {
   ntfyServer: string;
   ntfyTopic: string;
   enabled?: boolean;
+}
+
+export interface BinanceCopySettingsInput {
+  handle: string;
+  accountId: string;
+  enabled: boolean;
+  ntfyServer: string;
+  ntfyTopic: string;
+}
+
+export function buildBinanceCopyCreatePayload(
+  input: BinanceCopySettingsInput,
+) {
+  return {
+    platform: "binance_copy",
+    handle: input.handle.trim(),
+    accountId: input.accountId.trim(),
+    intervalMinutes: 10,
+    markets: ["crypto"],
+    ntfyServer: input.ntfyServer.trim(),
+    ntfyTopic: input.ntfyTopic.trim(),
+  };
+}
+
+export function buildBinanceCopyUpdatePayload(
+  input: BinanceCopySettingsInput,
+) {
+  return {
+    enabled: input.enabled,
+    ntfyServer: input.ntfyServer.trim(),
+    ntfyTopic: input.ntfyTopic.trim(),
+  };
+}
+
+export async function createBinanceCopySubscription(
+  input: BinanceCopySettingsInput,
+): Promise<AdminSubscription> {
+  const json = await sendJson("/api/admin/subscriptions", {
+    method: "POST",
+    body: JSON.stringify(buildBinanceCopyCreatePayload(input)),
+  });
+  if (!isRecord(json)) throw new Error("创建响应无效");
+  const created = normalizeAdminSubscription(json.item);
+  return input.enabled
+    ? created
+    : updateBinanceCopySubscription(created.id, input);
+}
+
+export async function updateBinanceCopySubscription(
+  id: number,
+  input: BinanceCopySettingsInput,
+): Promise<AdminSubscription> {
+  const json = await sendJson(`/api/admin/subscriptions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(buildBinanceCopyUpdatePayload(input)),
+  });
+  if (!isRecord(json)) throw new Error("更新响应无效");
+  return normalizeAdminSubscription(json.item);
 }
 
 export async function createAdminSubscription(

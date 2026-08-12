@@ -2546,16 +2546,6 @@ button.tag-badge {
   gap: 10px;
 }
 
-.trade-prompt-note {
-  margin: 0;
-  padding: 9px 10px;
-  border-left: 2px solid #f3ba2f;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.5;
-  background: rgba(243, 186, 47, 0.07);
-}
-
 .prompt-editor textarea {
   min-height: 132px;
   padding: 9px 10px;
@@ -2597,6 +2587,42 @@ button.tag-badge {
 .settings-actions .settings-delete-button:hover:not(:disabled) {
   color: #ffd6d6;
   border-color: rgba(255, 91, 91, 0.7);
+}
+
+.binance-copy-editor {
+  width: 100%;
+}
+
+.trade-config-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(243, 186, 47, 0.32);
+  border-radius: var(--radius-sm);
+  background: rgba(243, 186, 47, 0.07);
+}
+
+.trade-config-summary > svg {
+  flex: 0 0 auto;
+  color: #f3ba2f;
+}
+
+.trade-config-summary strong,
+.trade-config-summary span {
+  display: block;
+}
+
+.trade-config-summary strong {
+  color: var(--text-strong);
+  font-size: 0.84rem;
+}
+
+.trade-config-summary span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
 }
 
 @media (max-width: 1180px) {

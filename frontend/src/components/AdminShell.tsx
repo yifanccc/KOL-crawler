@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Activity,
   BellRing,
   Bot,
   Database,
@@ -23,7 +22,7 @@ import {
   updateAdminSubscription,
 } from "@/lib/api";
 import { CollectorHealthCard } from "@/components/CollectorHealthCard";
-import { platformLabel, requiresAccountId } from "@/lib/platforms";
+import { contentPlatforms, platformLabel } from "@/lib/platforms";
 import type { AdminConfigOptions, AdminSubscription, Asset, Signal } from "@/lib/types";
 
 const marketLabels: Record<string, string> = {
@@ -38,7 +37,6 @@ const marketLabels: Record<string, string> = {
 interface SubscriptionForm {
   platform: string;
   handle: string;
-  accountId: string;
   intervalMinutes: string;
   markets: string[];
   systemPrompt: string;
@@ -50,10 +48,10 @@ interface SubscriptionForm {
 }
 
 function newForm(options: AdminConfigOptions): SubscriptionForm {
+  const platforms = contentPlatforms(options.platforms);
   return {
-    platform: options.platforms.includes("x") ? "x" : options.platforms[0] || "x",
+    platform: platforms.includes("x") ? "x" : platforms[0] || "x",
     handle: "",
-    accountId: "",
     intervalMinutes: String(options.defaultIntervalMinutes),
     markets: [...options.markets],
     systemPrompt: options.defaultSystemPrompt,
@@ -69,7 +67,6 @@ function subscriptionForm(subscription: AdminSubscription): SubscriptionForm {
   return {
     platform: subscription.platform,
     handle: subscription.handle,
-    accountId: subscription.accountId || "",
     intervalMinutes: String(subscription.intervalMinutes),
     markets: subscription.markets,
     systemPrompt: subscription.systemPrompt || subscription.effectiveSystemPrompt,
@@ -112,9 +109,13 @@ export function AdminShell({
         if (!active) return;
         setOptions(nextOptions);
         setSubscriptions(nextSubscriptions);
-        if (nextSubscriptions[0]) {
-          setSelectedId(nextSubscriptions[0].id);
-          setForm(subscriptionForm(nextSubscriptions[0]));
+        const firstContentSubscription = nextSubscriptions.find(
+          (subscription) =>
+            contentPlatforms([subscription.platform]).length > 0,
+        );
+        if (firstContentSubscription) {
+          setSelectedId(firstContentSubscription.id);
+          setForm(subscriptionForm(firstContentSubscription));
         } else {
           setForm(newForm(nextOptions));
         }
@@ -134,6 +135,15 @@ export function AdminShell({
       { label: "结构化信号", value: signals.length, icon: ShieldCheck },
     ],
     [assets.length, signals.length, subscriptions.length],
+  );
+
+  const contentSubscriptions = useMemo(
+    () =>
+      subscriptions.filter(
+        (subscription) =>
+          contentPlatforms([subscription.platform]).length > 0,
+      ),
+    [subscriptions],
   );
 
   function startNew() {
@@ -172,9 +182,7 @@ export function AdminShell({
         throw new Error("Output schema 必须是 JSON 对象");
       }
       const common = {
-        intervalMinutes: requiresAccountId(form.platform)
-          ? 10
-          : Math.max(1, Number(form.intervalMinutes) || 10),
+        intervalMinutes: Math.max(1, Number(form.intervalMinutes) || 10),
         markets: form.markets,
         systemPrompt: form.systemPrompt,
         userPrompt: form.userPrompt,
@@ -189,9 +197,6 @@ export function AdminShell({
             ...common,
             platform: form.platform,
             handle: form.handle,
-            ...(requiresAccountId(form.platform)
-              ? { accountId: form.accountId.trim() }
-              : {}),
           });
       setSubscriptions((current) => {
         const exists = current.some((item) => item.id === saved.id);
@@ -220,7 +225,10 @@ export function AdminShell({
       await deleteAdminSubscription(selectedId);
       const remaining = subscriptions.filter((subscription) => subscription.id !== selectedId);
       setSubscriptions(remaining);
-      const next = remaining[0];
+      const next = remaining.find(
+        (subscription) =>
+          contentPlatforms([subscription.platform]).length > 0,
+      );
       if (next) {
         setSelectedId(next.id);
         setForm(subscriptionForm(next));
@@ -245,8 +253,8 @@ export function AdminShell({
           <h1>KOL 监控与模型配置</h1>
         </div>
         <div className="settings-header-actions">
-          <Link className="settings-new-button" href="/admin/signals">
-            <Activity size={16} aria-hidden="true" />私有交易信号
+          <Link className="settings-new-button" href="/admin/binance-copy">
+            <Database size={16} aria-hidden="true" />Binance Copy 配置
           </Link>
           <button type="button" className="settings-new-button" onClick={startNew} disabled={!options}>
             <Plus size={16} aria-hidden="true" />新建订阅
@@ -269,9 +277,9 @@ export function AdminShell({
       {form && options ? (
         <section className="settings-workspace">
           <aside className="settings-subscriptions">
-            <div className="settings-section-title"><BellRing size={16} aria-hidden="true" /><h2>订阅列表</h2><span>{subscriptions.length}</span></div>
+            <div className="settings-section-title"><BellRing size={16} aria-hidden="true" /><h2>内容订阅</h2><span>{contentSubscriptions.length}</span></div>
             <div className="settings-subscription-list">
-              {subscriptions.map((subscription) => (
+              {contentSubscriptions.map((subscription) => (
                 <button
                   className={selectedId === subscription.id ? "active" : ""}
                   key={subscription.id}
@@ -283,9 +291,7 @@ export function AdminShell({
                     <strong>{subscription.platform === "x" ? `@${subscription.handle}` : subscription.handle}</strong>
                     <small className="settings-subscription-meta">
                       <span>{platformLabel(subscription.platform)}</span>
-                      {subscription.accountId ? <code>ID {subscription.accountId}</code> : null}
                       <span>{subscription.intervalMinutes} 分钟</span>
-                      {subscription.visibility === "private" ? <em>私有</em> : null}
                     </small>
                   </div>
                   <Edit3 size={14} aria-hidden="true" />
@@ -303,37 +309,16 @@ export function AdminShell({
                 setForm({
                   ...form,
                   platform,
-                  accountId: "",
-                  intervalMinutes: requiresAccountId(platform) ? "10" : form.intervalMinutes,
                 });
-              }}>{options.platforms.map((platform) => <option key={platform} value={platform}>{platformLabel(platform)}</option>)}</select></label>
-              <label><span>{requiresAccountId(form.platform) ? "KOL 昵称" : "KOL handle"}</span><input disabled={Boolean(selectedId)} required value={form.handle} onChange={(event) => setForm({ ...form, handle: event.target.value })} placeholder={requiresAccountId(form.platform) ? "熬鹰资本" : "senerity"} /></label>
-              {requiresAccountId(form.platform) ? (
-                <label>
-                  <span>Portfolio ID</span>
-                  <input
-                    disabled={Boolean(selectedId)}
-                    inputMode="numeric"
-                    pattern="[0-9]{8,32}"
-                    required
-                    value={form.accountId}
-                    onChange={(event) => setForm({ ...form, accountId: event.target.value })}
-                    placeholder="5075281354358777856"
-                  />
-                </label>
-              ) : null}
-              <label><span>抓取间隔（分钟）</span><input disabled={requiresAccountId(form.platform)} min="1" type="number" value={form.intervalMinutes} onChange={(event) => setForm({ ...form, intervalMinutes: event.target.value })} /></label>
+              }}>{contentPlatforms(options.platforms).map((platform) => <option key={platform} value={platform}>{platformLabel(platform)}</option>)}</select></label>
+              <label><span>KOL handle</span><input disabled={Boolean(selectedId)} required value={form.handle} onChange={(event) => setForm({ ...form, handle: event.target.value })} placeholder="senerity" /></label>
+              <label><span>抓取间隔（分钟）</span><input min="1" type="number" value={form.intervalMinutes} onChange={(event) => setForm({ ...form, intervalMinutes: event.target.value })} /></label>
               <label className="settings-toggle"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /><span>启用监控</span></label>
             </div>
 
             <fieldset className="market-selector"><legend>关注市场</legend><div>{options.markets.map((market) => <label className={form.markets.includes(market) ? "selected" : ""} key={market}><input type="checkbox" checked={form.markets.includes(market)} onChange={() => toggleMarket(market)} /><span>{marketLabels[market] || market}</span></label>)}</div></fieldset>
 
             <div className="prompt-editor">
-              {requiresAccountId(form.platform) ? (
-                <p className="trade-prompt-note" role="note">
-                  交易动作、数量与推测持仓使用确定性规则解析，不调用模型；以下 prompt 仅保留为订阅配置。
-                </p>
-              ) : null}
               <label><span>System prompt</span><textarea value={form.systemPrompt} onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })} /></label>
               <label><span>User prompt</span><textarea value={form.userPrompt} onChange={(event) => setForm({ ...form, userPrompt: event.target.value })} /></label>
               <label><span>Output schema</span><textarea className="schema-editor" spellCheck={false} value={form.outputSchema} onChange={(event) => setForm({ ...form, outputSchema: event.target.value })} /></label>

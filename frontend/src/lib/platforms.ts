@@ -13,3 +13,7 @@ export function platformLabel(platform: string): string {
 export function requiresAccountId(platform: string): boolean {
   return ACCOUNT_ID_PLATFORMS.has(platform.toLowerCase());
 }
+
+export function contentPlatforms(platforms: string[]): string[] {
+  return platforms.filter((platform) => !requiresAccountId(platform));
+}
