@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
@@ -19,6 +19,7 @@ import {
   hasMoreSignals,
   loadedSignalsLabel,
   nextSignalOffset,
+  refreshSignalPage,
   SIGNAL_BATCH_SIZE,
 } from "@/lib/signalFeed";
 import type { Asset, Kol, SignalPage, SignalQuery } from "@/lib/types";
@@ -57,32 +58,62 @@ export function PrivateSignalFeed() {
   const [error, setError] = useState("");
   const [loadMoreError, setLoadMoreError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const hasLoadedRef = useRef(false);
   const requestVersionRef = useRef(0);
 
   useEffect(() => {
     let active = true;
+    const blocking = !hasLoadedRef.current;
     const requestVersion = requestVersionRef.current;
-    setLoading(true);
-    setError("");
+    if (blocking) {
+      setLoading(true);
+      setError("");
+    }
     fetchPrivateSignalPage(queryFor(filters, 0))
       .then((nextPage) => {
         if (!active || requestVersion !== requestVersionRef.current) return;
-        setPage(nextPage);
-        setNextOffset(nextSignalOffset(nextPage));
+        setPage((current) =>
+          blocking ? nextPage : refreshSignalPage(current, nextPage),
+        );
+        if (blocking) setNextOffset(nextSignalOffset(nextPage));
+        hasLoadedRef.current = true;
+        setError("");
         setLoadMoreError("");
       })
       .catch((reason: unknown) => {
-        if (active && requestVersion === requestVersionRef.current) {
+        if (
+          active &&
+          blocking &&
+          requestVersion === requestVersionRef.current
+        ) {
           setError(reason instanceof Error ? reason.message : "私有信号读取失败");
         }
       })
       .finally(() => {
-        if (active && requestVersion === requestVersionRef.current) setLoading(false);
+        if (
+          active &&
+          blocking &&
+          requestVersion === requestVersionRef.current
+        ) {
+          setLoading(false);
+        }
       });
     return () => {
       active = false;
     };
   }, [filters, reloadKey]);
+
+  const reload = useCallback(() => {
+    requestVersionRef.current += 1;
+    setLoadingMore(false);
+    setLoadMoreError("");
+    setReloadKey((value) => value + 1);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(reload, 60_000);
+    return () => window.clearInterval(timer);
+  }, [reload]);
 
   const filterOptions = useMemo(() => {
     const kolMap = new Map<string, Kol>();
@@ -108,16 +139,14 @@ export function PrivateSignalFeed() {
 
   function applyFilters(nextFilters: DashboardFilters) {
     requestVersionRef.current += 1;
+    hasLoadedRef.current = false;
     setPage(emptyPage);
     setNextOffset(0);
+    setLoading(true);
     setLoadingMore(false);
+    setError("");
     setLoadMoreError("");
     setFilters(nextFilters);
-  }
-
-  function reload() {
-    requestVersionRef.current += 1;
-    setReloadKey((value) => value + 1);
   }
 
   async function loadMore() {
