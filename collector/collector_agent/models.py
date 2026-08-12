@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -23,3 +23,18 @@ class OutboxPost:
     subscription_id: int
     external_id: str
     payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ProviderTarget:
+    subscription_id: int
+    platform: str
+    account_id: str | None
+    handle: str
+
+
+@dataclass(frozen=True)
+class PostFetchResult:
+    posts: list[CollectedPost]
+    candidate_checkpoint: str | None
+    kind: Literal["posts"] = "posts"
