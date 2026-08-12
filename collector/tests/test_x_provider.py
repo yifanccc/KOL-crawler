@@ -2,19 +2,25 @@ import json
 import subprocess
 from pathlib import Path
 
+from collector_agent.models import ProviderTarget
 from collector_agent.providers.x_opencli import OpenCliXProvider
+
+
+TARGET = ProviderTarget(1, "x", None, "senerity")
 
 
 def test_x_provider_parses_fixture_filters_checkpoint_and_detects_login_required():
     output = (Path(__file__).parent / "fixtures/opencli_x.yaml").read_text()
     provider = OpenCliXProvider(runner=lambda command: (0, output, ""))
-    posts = provider.fetch("senerity", "100", 20)
+    result = provider.fetch(TARGET, "100", 20)
+    posts = result.posts
     assert [post.external_id for post in posts] == ["101"]
     assert posts[0].author_handle == "senerity"
     assert posts[0].author_name == "Senerity"
+    assert result.candidate_checkpoint == "101"
     assert provider.health().status == "authenticated"
     failed = OpenCliXProvider(runner=lambda command: (1, "login required", ""))
-    assert failed.fetch("senerity", None, 20) == []
+    assert failed.fetch(TARGET, None, 20).posts == []
     assert failed.health().status == "login_required"
 
 
@@ -23,7 +29,9 @@ def test_x_provider_reports_timeout_without_advancing_checkpoint():
         raise subprocess.TimeoutExpired(cmd="opencli", timeout=60)
 
     provider = OpenCliXProvider(runner=timeout)
-    assert provider.fetch("senerity", "100", 20) == []
+    result = provider.fetch(TARGET, "100", 20)
+    assert result.posts == []
+    assert result.candidate_checkpoint == "100"
     assert provider.health().status == "failed"
     assert provider.health().message == "OpenCLI timed out"
 
@@ -47,7 +55,7 @@ def test_x_provider_keeps_only_latest_posts_within_limit():
         return 0, json.dumps(rows), ""
 
     provider = OpenCliXProvider(runner=runner)
-    posts = provider.fetch("senerity", "100", 5)
+    posts = provider.fetch(TARGET, "100", 5).posts
 
     assert commands == [
         ["opencli", "twitter", "tweets", "senerity", "--limit", "5", "--format", "json"]

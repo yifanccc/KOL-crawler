@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from collector_agent.db import CollectorStore
+from collector_agent.models import TRADE_PLATFORMS, ProviderTarget
 
 
 class CollectorScheduler:
@@ -80,10 +81,18 @@ class CollectorScheduler:
                     if checkpoint_before is None
                     else self.catchup_fetch_limit
                 )
-                posts = provider.fetch(subscription["handle"], checkpoint_before, limit)
+                target = ProviderTarget(
+                    subscription_id=subscription_id,
+                    platform=subscription["platform"],
+                    account_id=subscription.get("accountId"),
+                    handle=subscription["handle"],
+                )
+                result = provider.fetch(target, checkpoint_before, limit)
                 health = provider.health() if hasattr(provider, "health") else None
                 if health is not None and health.status not in {"healthy", "authenticated"}:
                     self.provider_failures.pop(subscription["platform"], None)
+                    if subscription["platform"] in TRADE_PLATFORMS:
+                        self.store.mark_trade_positions_stale(subscription_id, now)
                     self._log_subscription(
                         now,
                         subscription,
@@ -92,12 +101,28 @@ class CollectorScheduler:
                         provider_status=health.status,
                     )
                     continue
-                checkpoint = posts[-1].external_id if posts else checkpoint_before
-                self.store.record_fetch(subscription_id, checkpoint, posts)
+                if result.kind == "posts":
+                    fetched = len(result.posts)
+                    self.store.record_fetch(
+                        subscription_id,
+                        result.candidate_checkpoint,
+                        result.posts,
+                    )
+                    status = "success"
+                elif result.kind == "trade_records":
+                    fetched = len(result.records)
+                    self.store.record_trade_fetch(subscription_id, target, result)
+                    status = (
+                        "baseline_created" if checkpoint_before is None else "success"
+                    )
+                else:
+                    raise ValueError("unknown provider result kind")
                 self.provider_failures.pop(subscription["platform"], None)
                 ran.append(subscription_id)
-                self._log_subscription(now, subscription, "success", fetched=len(posts))
+                self._log_subscription(now, subscription, status, fetched=fetched)
             except Exception as exc:
+                if subscription["platform"] in TRADE_PLATFORMS:
+                    self.store.mark_trade_positions_stale(subscription_id, now)
                 self.provider_failures[subscription["platform"]] = "Provider fetch failed"
                 self._log_subscription(
                     now,

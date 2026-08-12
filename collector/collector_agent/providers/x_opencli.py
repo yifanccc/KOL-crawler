@@ -2,7 +2,7 @@ import json
 import subprocess
 from datetime import datetime
 
-from collector_agent.models import CollectedPost
+from collector_agent.models import CollectedPost, PostFetchResult, ProviderTarget
 from collector_agent.providers.base import ProviderHealth
 
 
@@ -24,18 +24,21 @@ class OpenCliXProvider:
         completed = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
         return completed.returncode, completed.stdout, completed.stderr
 
-    def fetch(self, handle: str, checkpoint: str | None, limit: int) -> list[CollectedPost]:
+    def fetch(
+        self, target: ProviderTarget, checkpoint: str | None, limit: int
+    ) -> PostFetchResult:
+        handle = target.handle
         try:
             code, output, error = self.runner(["opencli", "twitter", "tweets", handle, "--limit", str(limit), "--format", "json"])
         except subprocess.TimeoutExpired:
             self._health = ProviderHealth("failed", "OpenCLI timed out")
-            return []
+            return PostFetchResult([], checkpoint)
         except OSError:
             self._health = ProviderHealth("failed", "OpenCLI could not be started")
-            return []
+            return PostFetchResult([], checkpoint)
         if code or "login required" in (output + error).lower() or "verification" in (output + error).lower():
             self._health = ProviderHealth("login_required" if "login" in (output + error).lower() else "failed")
-            return []
+            return PostFetchResult([], checkpoint)
         try:
             rows = json.loads(output)
             if not isinstance(rows, list):
@@ -59,10 +62,12 @@ class OpenCliXProvider:
             filtered = [post for post in posts if checkpoint is None or int(post.external_id) > int(checkpoint)]
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._health = ProviderHealth("failed", "invalid OpenCLI JSON")
-            return []
+            return PostFetchResult([], checkpoint)
         self._health = ProviderHealth("authenticated")
         ordered = sorted(filtered, key=lambda post: int(post.external_id))
-        return ordered[-limit:]
+        selected = ordered[-limit:]
+        candidate_checkpoint = selected[-1].external_id if selected else checkpoint
+        return PostFetchResult(selected, candidate_checkpoint)
 
     def health(self) -> ProviderHealth:
         return self._health

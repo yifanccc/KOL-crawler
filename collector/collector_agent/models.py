@@ -3,6 +3,9 @@ from datetime import datetime
 from typing import Any, Literal
 
 
+TRADE_PLATFORMS = frozenset({"binance_copy"})
+
+
 @dataclass(frozen=True)
 class CollectedPost:
     platform: str

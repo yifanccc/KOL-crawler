@@ -1,9 +1,14 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+
+import pytest
 
 from collector_agent.db import CollectorStore
-from collector_agent.models import CollectedPost
+from collector_agent.models import CollectedPost, PostFetchResult, ProviderTarget
 from collector_agent.scheduler import CollectorScheduler
 from collector_agent.providers.base import ProviderHealth
+from collector_agent.trade_models import TradeRecordFetchResult
+from tests.trade_samples import checkpoint, sample_record
 
 
 class Api:
@@ -16,16 +21,18 @@ class Api:
 
 
 class Provider:
-    def fetch(self, handle, checkpoint, limit):
-        return [CollectedPost("x", handle + "-1", handle, handle, None, datetime(2026, 7, 10, tzinfo=UTC), "https://x.com", "$BTC", {}, handle)]
+    def fetch(self, target, checkpoint, limit):
+        handle = target.handle
+        posts = [CollectedPost("x", handle + "-1", handle, handle, None, datetime(2026, 7, 10, tzinfo=UTC), "https://x.com", "$BTC", {}, handle)]
+        return PostFetchResult(posts, posts[-1].external_id)
 
     def health(self):
         return ProviderHealth("authenticated")
 
 
 class ReturnedHealthFailureProvider:
-    def fetch(self, handle, checkpoint, limit):
-        return []
+    def fetch(self, target, checkpoint, limit):
+        return PostFetchResult([], checkpoint)
 
     def health(self):
         return ProviderHealth("failed", "OpenCLI timed out")
@@ -86,15 +93,15 @@ class RecordingLimitProvider(Provider):
         self.limits = []
         self.sequence = 0
 
-    def fetch(self, handle, checkpoint, limit):
+    def fetch(self, target, checkpoint, limit):
         self.limits.append(limit)
         self.sequence += 1
-        return [
+        posts = [
             CollectedPost(
                 "x",
                 str(self.sequence),
-                handle,
-                handle,
+                target.handle,
+                target.handle,
                 None,
                 datetime(2026, 7, 10, tzinfo=UTC),
                 "https://x.com",
@@ -103,6 +110,7 @@ class RecordingLimitProvider(Provider):
                 None,
             )
         ]
+        return PostFetchResult(posts, posts[-1].external_id)
 
 
 def test_scheduler_uses_initial_then_catchup_limit(tmp_path):
@@ -127,9 +135,10 @@ class RestartCatchupProvider(Provider):
     def __init__(self):
         self.calls = []
 
-    def fetch(self, handle, checkpoint, limit):
-        self.calls.append((handle, checkpoint, limit))
-        return [
+    def fetch(self, target, checkpoint, limit):
+        handle = target.handle
+        self.calls.append((handle, target.account_id, checkpoint, limit))
+        posts = [
             CollectedPost(
                 "x",
                 str(external_id),
@@ -144,6 +153,7 @@ class RestartCatchupProvider(Provider):
             )
             for external_id in range(101, 106)
         ]
+        return PostFetchResult(posts, posts[-1].external_id)
 
 
 class RestartCatchupApi(Api):
@@ -182,7 +192,7 @@ def test_scheduler_uses_persisted_checkpoint_for_restart_catchup(tmp_path):
 
     scheduler.run_once(datetime(2026, 7, 10, tzinfo=UTC))
 
-    assert provider.calls == [("one", "100", 5)]
+    assert provider.calls == [("one", None, "100", 5)]
     assert after_restart.checkpoint_for(1) == "105"
     assert after_restart.pending_posts() == []
 
@@ -242,14 +252,16 @@ class IsolatedProviderApi(Api):
 
 
 class FailingProvider:
-    def fetch(self, handle, checkpoint, limit):
+    def fetch(self, target, checkpoint, limit):
         raise RuntimeError("provider internals must not escape")
 
 
 class BinanceProvider(Provider):
-    def fetch(self, handle, checkpoint, limit):
-        post = super().fetch(handle, checkpoint, limit)[0]
-        return [CollectedPost("binance_square", post.external_id, post.author_handle, post.author_name, post.author_avatar_url, post.published_at, post.url, post.raw_content, post.raw_payload, post.content_hash)]
+    def fetch(self, target, checkpoint, limit):
+        result = super().fetch(target, checkpoint, limit)
+        post = result.posts[0]
+        posts = [CollectedPost("binance_square", post.external_id, post.author_handle, post.author_name, post.author_avatar_url, post.published_at, post.url, post.raw_content, post.raw_payload, post.content_hash)]
+        return PostFetchResult(posts, posts[-1].external_id)
 
     def health(self):
         return ProviderHealth("healthy")
@@ -272,3 +284,102 @@ def test_provider_failure_does_not_block_other_providers_or_heartbeat(tmp_path):
         {"platform": "binance_square", "status": "healthy", "message": None},
         {"platform": "x", "status": "failed", "message": "Provider fetch failed"},
     ]
+
+
+class TradeApi(Api):
+    def fetch_config(self):
+        return {
+            "agentId": "home",
+            "pollSeconds": 60,
+            "subscriptions": [
+                {
+                    "id": 21,
+                    "platform": "binance_copy",
+                    "handle": "熬鹰资本",
+                    "accountId": "5075281354358777856",
+                    "intervalMinutes": 10,
+                    "enabled": True,
+                }
+            ],
+        }
+
+
+class TradeProvider:
+    def __init__(self):
+        self.targets: list[ProviderTarget] = []
+        self._health = ProviderHealth("authenticated")
+
+    def fetch(self, target, current_checkpoint, limit):
+        self.targets.append(target)
+        return TradeRecordFetchResult(
+            records=[sample_record("1", "OPEN", "LONG", "0.10")],
+            candidate_checkpoint=checkpoint("1"),
+            history_complete=False,
+        )
+
+    def health(self):
+        return self._health
+
+
+def test_scheduler_creates_trade_baseline_with_fixed_account_target(tmp_path, capsys):
+    provider = TradeProvider()
+    store = CollectorStore(tmp_path / "db.sqlite")
+    scheduler = CollectorScheduler(store, TradeApi(), {"binance_copy": provider})
+    now = datetime(2026, 8, 9, tzinfo=UTC)
+
+    assert scheduler.run_once(now) == [21]
+
+    assert provider.targets == [
+        ProviderTarget(21, "binance_copy", "5075281354358777856", "熬鹰资本")
+    ]
+    assert store.pending_posts() == []
+    assert store.checkpoint_for(21) == checkpoint("1")
+    assert scheduler.next_check[21] == now + timedelta(minutes=10)
+    assert "status=baseline_created" in capsys.readouterr().out
+
+
+class UnhealthyTradeProvider(TradeProvider):
+    def fetch(self, target, current_checkpoint, limit):
+        self.targets.append(target)
+        return TradeRecordFetchResult([], current_checkpoint, history_complete=False)
+
+    def health(self):
+        return ProviderHealth("access_limited", "read access unavailable")
+
+
+class RaisingTradeProvider(TradeProvider):
+    def fetch(self, target, current_checkpoint, limit):
+        raise RuntimeError("temporary Binance failure")
+
+
+@pytest.mark.parametrize(
+    "failed_provider",
+    [UnhealthyTradeProvider(), RaisingTradeProvider()],
+)
+def test_scheduler_marks_trade_position_stale_without_advancing_checkpoint(
+    tmp_path, failed_provider
+):
+    store = CollectorStore(tmp_path / "db.sqlite")
+    store.record_trade_fetch(
+        21,
+        ProviderTarget(21, "binance_copy", "5075281354358777856", "熬鹰资本"),
+        TradeRecordFetchResult(
+            [sample_record("1", "OPEN", "LONG", "0.10")],
+            checkpoint("1"),
+            history_complete=False,
+        ),
+    )
+    scheduler = CollectorScheduler(
+        store,
+        TradeApi(),
+        {"binance_copy": failed_provider},
+    )
+    before = store.checkpoint_for(21)
+
+    assert scheduler.run_once(datetime(2026, 8, 9, 1, tzinfo=UTC)) == []
+
+    assert store.checkpoint_for(21) == before
+    position = store.position_for(21, "BTCUSDT", "LONG")
+    assert position is not None
+    assert position.status == "STALE"
+    assert position.quantity == Decimal("0.10")

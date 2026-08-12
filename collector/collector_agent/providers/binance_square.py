@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from collector_agent.models import CollectedPost
+from collector_agent.models import CollectedPost, PostFetchResult, ProviderTarget
 from collector_agent.providers.base import ProviderHealth
 
 
@@ -15,14 +15,17 @@ class BinanceSquareProvider:
         self.client = client
         self._health = ProviderHealth("healthy")
 
-    def fetch(self, handle: str, checkpoint: str | None, limit: int) -> list[CollectedPost]:
+    def fetch(
+        self, target: ProviderTarget, checkpoint: str | None, limit: int
+    ) -> PostFetchResult:
+        handle = target.handle
         try:
             profile = self.client.user_by_username(handle)
             if not profile or not profile.get("squareUid"):
                 self._health = ProviderHealth(
                     "failed", "Binance Square profile was not found"
                 )
-                return []
+                return PostFetchResult([], checkpoint)
             payload = self.client.user_posts(profile["squareUid"])
             rows = payload.get("contents", []) if isinstance(payload, dict) else []
             posts = []
@@ -61,13 +64,15 @@ class BinanceSquareProvider:
                 )
         except (KeyError, TypeError, ValueError):
             self._health = ProviderHealth("failed", "Invalid Binance Square response")
-            return []
+            return PostFetchResult([], checkpoint)
         except Exception:
             self._health = ProviderHealth("failed", "Binance Square request failed")
-            return []
+            return PostFetchResult([], checkpoint)
         self._health = ProviderHealth("healthy")
         ordered = sorted(posts, key=lambda post: int(post.external_id))
-        return ordered[-limit:]
+        selected = ordered[-limit:]
+        candidate_checkpoint = selected[-1].external_id if selected else checkpoint
+        return PostFetchResult(selected, candidate_checkpoint)
 
     def health(self) -> ProviderHealth:
         return self._health

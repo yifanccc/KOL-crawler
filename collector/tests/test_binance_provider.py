@@ -1,4 +1,8 @@
+from collector_agent.models import ProviderTarget
 from collector_agent.providers.binance_square import BinanceSquareProvider
+
+
+TARGET = ProviderTarget(2, "binance_square", None, "btc7873")
 
 
 class Client:
@@ -43,7 +47,8 @@ class Client:
 def test_binance_provider_parses_real_api_shape_and_orders_oldest_first():
     provider = BinanceSquareProvider(Client())
 
-    posts = provider.fetch("btc7873", None, 20)
+    result = provider.fetch(TARGET, None, 20)
+    posts = result.posts
 
     assert [post.external_id for post in posts] == [
         "343206852746065",
@@ -58,13 +63,14 @@ def test_binance_provider_parses_real_api_shape_and_orders_oldest_first():
         "webLink": "https://www.binance.com/zh-CN/square/post/343206852746065",
         "tradingPairs": [{"code": "ETH"}],
     }
+    assert result.candidate_checkpoint == "343206852746066"
     assert provider.health().status == "healthy"
 
 
 def test_binance_provider_filters_checkpoint():
     provider = BinanceSquareProvider(Client())
 
-    posts = provider.fetch("btc7873", "343206852746065", 20)
+    posts = provider.fetch(TARGET, "343206852746065", 20).posts
 
     assert [post.external_id for post in posts] == ["343206852746066"]
 
@@ -72,6 +78,7 @@ def test_binance_provider_filters_checkpoint():
 def test_binance_invalid_profile_is_reported_as_provider_failure():
     provider = BinanceSquareProvider(Client())
 
-    assert provider.fetch("missing", None, 20) == []
+    missing = ProviderTarget(2, "binance_square", None, "missing")
+    assert provider.fetch(missing, None, 20).posts == []
     assert provider.health().status == "failed"
     assert provider.health().message == "Binance Square profile was not found"
