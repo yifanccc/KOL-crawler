@@ -2,7 +2,14 @@ import json
 import sqlite3
 from pathlib import Path
 
-from collector_agent.models import CollectedPost, OutboxPost
+from collector_agent.models import CollectedPost, OutboxPost, ProviderTarget, collected_post_payload
+from collector_agent.trade_models import PositionEstimate, TradePositionSide, TradeRecordFetchResult
+from collector_agent.trade_store import (
+    initialize_trade_store,
+    mark_trade_positions_stale,
+    position_for,
+    record_trade_fetch,
+)
 
 
 class CollectorStore:
@@ -15,6 +22,7 @@ class CollectorStore:
             CREATE TABLE IF NOT EXISTS dead_letters (id INTEGER PRIMARY KEY, external_id TEXT NOT NULL, payload_json TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS alert_cooldowns (key TEXT PRIMARY KEY, sent_at TEXT NOT NULL);
         """)
+        initialize_trade_store(self.connection)
         self.connection.commit()
 
     def close(self) -> None:
@@ -28,11 +36,33 @@ class CollectorStore:
         inserted = 0
         with self.connection:
             for post in posts:
-                payload = {"subscriptionId": subscription_id, "platform": post.platform, "externalId": post.external_id, "authorHandle": post.author_handle, "authorName": post.author_name, "authorAvatarUrl": post.author_avatar_url, "publishedAt": post.published_at.isoformat() if post.published_at else None, "url": post.url, "rawContent": post.raw_content, "rawPayload": post.raw_payload, "contentHash": post.content_hash}
+                payload = collected_post_payload(subscription_id, post)
                 cursor = self.connection.execute("INSERT OR IGNORE INTO outbox_posts (subscription_id, external_id, payload_json) VALUES (?, ?, ?)", (subscription_id, post.external_id, json.dumps(payload, ensure_ascii=False)))
                 inserted += cursor.rowcount
-            self.connection.execute("INSERT INTO subscription_state (subscription_id, checkpoint) VALUES (?, ?) ON CONFLICT(subscription_id) DO UPDATE SET checkpoint = excluded.checkpoint", (subscription_id, checkpoint))
+            if checkpoint is not None:
+                self.connection.execute("INSERT INTO subscription_state (subscription_id, checkpoint) VALUES (?, ?) ON CONFLICT(subscription_id) DO UPDATE SET checkpoint = excluded.checkpoint", (subscription_id, checkpoint))
         return inserted
+
+    def record_trade_fetch(
+        self,
+        subscription_id: int,
+        target: ProviderTarget,
+        result: TradeRecordFetchResult,
+    ) -> int:
+        return record_trade_fetch(self.connection, subscription_id, target, result)
+
+    def mark_trade_positions_stale(
+        self, subscription_id: int, stale_since
+    ) -> None:
+        mark_trade_positions_stale(self.connection, subscription_id, stale_since)
+
+    def position_for(
+        self,
+        subscription_id: int,
+        symbol: str,
+        position_side: TradePositionSide,
+    ) -> PositionEstimate | None:
+        return position_for(self.connection, subscription_id, symbol, position_side)
 
     def pending_posts(self, limit: int = 100) -> list[OutboxPost]:
         rows = self.connection.execute("SELECT id, subscription_id, external_id, payload_json FROM outbox_posts WHERE status = 'pending' ORDER BY id LIMIT ?", (limit,)).fetchall()

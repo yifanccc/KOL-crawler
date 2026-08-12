@@ -38,3 +38,19 @@ class PostFetchResult:
     posts: list[CollectedPost]
     candidate_checkpoint: str | None
     kind: Literal["posts"] = "posts"
+
+
+def collected_post_payload(subscription_id: int, post: CollectedPost) -> dict[str, Any]:
+    return {
+        "subscriptionId": subscription_id,
+        "platform": post.platform,
+        "externalId": post.external_id,
+        "authorHandle": post.author_handle,
+        "authorName": post.author_name,
+        "authorAvatarUrl": post.author_avatar_url,
+        "publishedAt": post.published_at.isoformat() if post.published_at else None,
+        "url": post.url,
+        "rawContent": post.raw_content,
+        "rawPayload": post.raw_payload,
+        "contentHash": post.content_hash,
+    }

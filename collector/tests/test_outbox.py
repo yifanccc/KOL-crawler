@@ -45,3 +45,12 @@ def test_upload_results_match_same_external_id_in_submission_order(tmp_path) -> 
 
     assert store.pending_posts() == []
     assert store.dead_letter_count() == 1
+
+
+def test_empty_post_fetch_does_not_clear_existing_checkpoint(tmp_path) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    store.record_fetch(1, "10", [post("10")])
+
+    assert store.record_fetch(1, None, []) == 0
+
+    assert store.checkpoint_for(1) == "10"
