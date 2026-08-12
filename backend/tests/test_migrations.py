@@ -1,4 +1,18 @@
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, UniqueConstraint, create_engine, inspect, text
+import pytest
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    inspect,
+    text,
+)
+from sqlalchemy.exc import IntegrityError
 
 import app.models  # noqa: F401
 from app.db.base import Base
@@ -14,6 +28,7 @@ RAW_POST_ANALYSIS_COLUMNS = {
 }
 
 SUBSCRIPTION_LIFECYCLE_COLUMNS = {"deleted_at"}
+SUBSCRIPTION_TRADE_COLUMNS = {"platform_account_id", "visibility"}
 KOL_IDENTITY_COLUMNS = {"platform"}
 
 
@@ -30,12 +45,67 @@ def test_migrations_are_idempotent_for_fresh_schema() -> None:
 
     assert RAW_POST_ANALYSIS_COLUMNS <= column_names(engine, "raw_posts")
     assert {"avatar_url", *KOL_IDENTITY_COLUMNS} <= column_names(engine, "kol_profiles")
-    assert SUBSCRIPTION_LIFECYCLE_COLUMNS <= column_names(engine, "subscriptions")
+    assert {
+        *SUBSCRIPTION_LIFECYCLE_COLUMNS,
+        *SUBSCRIPTION_TRADE_COLUMNS,
+    } <= column_names(engine, "subscriptions")
+    subscription_constraints = inspect(engine).get_unique_constraints("subscriptions")
+    assert any(
+        set(constraint["column_names"] or []) == {"platform", "platform_account_id"}
+        for constraint in subscription_constraints
+    )
     unique_constraints = inspect(engine).get_unique_constraints("raw_posts")
     assert any(
         set(constraint["column_names"] or []) == {"platform", "external_id"}
         for constraint in unique_constraints
     )
+
+
+def test_migrations_add_binance_copy_identity_and_private_visibility() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    metadata = MetaData()
+    Table(
+        "subscriptions",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("platform", String(32), nullable=False),
+        Column("platform_handle", String(255), nullable=False),
+    )
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO subscriptions (id, platform, platform_handle) VALUES "
+                "(1, 'x', 'legacy'), (2, 'binance_copy', '熬鹰资本')"
+            )
+        )
+
+    run_schema_migrations(engine)
+    run_schema_migrations(engine)
+
+    assert SUBSCRIPTION_TRADE_COLUMNS <= column_names(engine, "subscriptions")
+    with engine.connect() as connection:
+        visibility = connection.execute(
+            text("SELECT id, visibility FROM subscriptions ORDER BY id")
+        ).all()
+    assert visibility == [(1, "public"), (2, "private")]
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE subscriptions SET platform_account_id = "
+                "'5075281354358777856' WHERE id = 2"
+            )
+        )
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO subscriptions "
+                    "(id, platform, platform_handle, platform_account_id) VALUES "
+                    "(3, 'binance_copy', 'duplicate', '5075281354358777856')"
+                )
+            )
 
 
 def test_migrations_split_legacy_shared_kol_profiles_by_platform() -> None:

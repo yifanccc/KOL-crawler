@@ -1,22 +1,43 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
 
 DEFAULT_MONITOR_INTERVAL_MINUTES = 10
+TRADE_PLATFORMS = frozenset({"binance_copy"})
 
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
-    __table_args__ = (CheckConstraint("interval_minutes >= 1", name="ck_subscription_interval_min"),)
+    __table_args__ = (
+        CheckConstraint("interval_minutes >= 1", name="ck_subscription_interval_min"),
+        UniqueConstraint(
+            "platform",
+            "platform_account_id",
+            name="uq_subscriptions_platform_account",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     kol_profile_id: Mapped[int | None] = mapped_column(ForeignKey("kol_profiles.id"))
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     platform_account_id: Mapped[str | None] = mapped_column(String(255))
+    visibility: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="public", server_default="public"
+    )
     platform_handle: Mapped[str] = mapped_column(String(255), nullable=False)
     interval_minutes: Mapped[int] = mapped_column(
         Integer,

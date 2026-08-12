@@ -4,6 +4,8 @@ from sqlalchemy.engine import Engine
 
 MIGRATION_COLUMNS = {
     "subscriptions": {
+        "platform_account_id": "VARCHAR(255) NULL",
+        "visibility": "VARCHAR(16) NOT NULL DEFAULT 'public'",
         "system_prompt": "LONGTEXT NULL",
         "user_prompt": "LONGTEXT NULL",
         "output_schema_json": "LONGTEXT NULL",
@@ -152,6 +154,44 @@ def run_schema_migrations(engine: Engine) -> None:
             for column, definition in definitions.items():
                 if column not in existing:
                     connection.execute(text(f"ALTER TABLE `{table}` ADD COLUMN `{column}` {definition}"))
+        if "subscriptions" in existing_tables:
+            subscription_identity = {"platform", "platform_account_id"}
+            subscription_inspector = inspect(connection)
+            subscription_columns = {
+                item["name"]
+                for item in subscription_inspector.get_columns("subscriptions")
+            }
+            if subscription_identity <= subscription_columns:
+                connection.execute(
+                    text(
+                        "UPDATE subscriptions SET visibility = 'private' "
+                        "WHERE platform = 'binance_copy'"
+                    )
+                )
+                has_identity_constraint = any(
+                    set(item["column_names"] or []) == subscription_identity
+                    for item in subscription_inspector.get_unique_constraints("subscriptions")
+                ) or any(
+                    item.get("unique")
+                    and set(item["column_names"] or []) == subscription_identity
+                    for item in subscription_inspector.get_indexes("subscriptions")
+                )
+                if not has_identity_constraint:
+                    if engine.dialect.name == "sqlite":
+                        connection.execute(
+                            text(
+                                "CREATE UNIQUE INDEX uq_subscriptions_platform_account "
+                                "ON subscriptions (platform, platform_account_id)"
+                            )
+                        )
+                    elif engine.dialect.name == "mysql":
+                        connection.execute(
+                            text(
+                                "ALTER TABLE subscriptions ADD CONSTRAINT "
+                                "uq_subscriptions_platform_account "
+                                "UNIQUE (platform, platform_account_id)"
+                            )
+                        )
         if {"kol_profiles", "subscriptions"} <= existing_tables:
             _repair_kol_platform_identity(connection)
         if {"raw_posts", "signals"} <= existing_tables:
