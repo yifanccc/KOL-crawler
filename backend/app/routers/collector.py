@@ -68,6 +68,7 @@ def collector_config(
                 "id": row.id,
                 "platform": row.platform,
                 "handle": row.platform_handle,
+                "accountId": row.platform_account_id,
                 "intervalMinutes": row.interval_minutes,
                 "enabled": row.enabled,
             }

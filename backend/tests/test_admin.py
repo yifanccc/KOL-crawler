@@ -125,6 +125,93 @@ def test_new_subscription_uses_ten_minute_and_fixed_prompt_defaults() -> None:
     assert "内容简洁，不需要增加作者认为" in item["systemPrompt"]
 
 
+def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() -> None:
+    reset_database()
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        missing_account = client.post(
+            "/api/admin/subscriptions",
+            headers=headers,
+            json={"platform": "binance_copy", "handle": "熬鹰资本"},
+        )
+        invalid_account = client.post(
+            "/api/admin/subscriptions",
+            headers=headers,
+            json={
+                "platform": "binance_copy",
+                "handle": "熬鹰资本",
+                "accountId": "not-a-number",
+            },
+        )
+        invalid_interval = client.post(
+            "/api/admin/subscriptions",
+            headers=headers,
+            json={
+                "platform": "binance_copy",
+                "handle": "熬鹰资本",
+                "accountId": "5075281354358777856",
+                "intervalMinutes": 1,
+            },
+        )
+        created = client.post(
+            "/api/admin/subscriptions",
+            headers=headers,
+            json={
+                "platform": "binance_copy",
+                "handle": "熬鹰资本",
+                "accountId": "5075281354358777856",
+            },
+        )
+        duplicate = client.post(
+            "/api/admin/subscriptions",
+            headers=headers,
+            json={
+                "platform": "binance_copy",
+                "handle": "仿冒昵称",
+                "accountId": "5075281354358777856",
+            },
+        )
+
+        assert created.status_code == 200
+        item = created.json()["item"]
+        mutable_interval = client.patch(
+            f"/api/admin/subscriptions/{item['id']}",
+            headers=headers,
+            json={"intervalMinutes": 1},
+        )
+        mutable_account = client.patch(
+            f"/api/admin/subscriptions/{item['id']}",
+            headers=headers,
+            json={"accountId": "11111111"},
+        )
+
+    assert missing_account.status_code == 422
+    assert invalid_account.status_code == 422
+    assert invalid_interval.status_code == 422
+    assert item["accountId"] == "5075281354358777856"
+    assert item["visibility"] == "private"
+    assert item["intervalMinutes"] == 10
+    assert duplicate.status_code == 409
+    assert mutable_interval.status_code == 422
+    assert mutable_account.status_code == 422
+
+
+def test_regular_subscription_rejects_trade_account_id() -> None:
+    reset_database()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/admin/subscriptions",
+            headers=auth_headers(client),
+            json={
+                "platform": "x",
+                "handle": "regular-kol",
+                "accountId": "5075281354358777856",
+            },
+        )
+
+    assert response.status_code == 422
+
+
 def test_admin_rejects_incompatible_custom_output_schema() -> None:
     reset_database()
     with TestClient(app) as client:

@@ -3,14 +3,14 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import CrawlRun, KolProfile, ModelConfig, NotificationEvent, NotificationRule, Subscription
-from app.models.subscription import DEFAULT_MONITOR_INTERVAL_MINUTES
+from app.models.subscription import DEFAULT_MONITOR_INTERVAL_MINUTES, TRADE_PLATFORMS
 from app.routers.auth import authenticate, require_authenticated, set_session_cookie
 from app.services.collector_health import collector_health_payload
 from app.services.structurer import (
@@ -22,7 +22,7 @@ from app.services.structurer import (
 
 router = APIRouter(prefix="/api/admin")
 
-PLATFORMS = {"x", "binance_square"}
+PLATFORMS = {"x", "binance_square", *TRADE_PLATFORMS}
 MARKETS = {"crypto", "us_stock", "a_share", "hk_stock", "macro", "unknown"}
 ALL_MARKETS = ["crypto", "us_stock", "a_share", "hk_stock", "macro", "unknown"]
 
@@ -46,6 +46,7 @@ def _normalize_handle(platform: str, value: str) -> str:
 class SubscriptionCreate(BaseModel):
     platform: str = Field(default="x", min_length=1, max_length=32)
     handle: str = Field(min_length=1, max_length=255)
+    accountId: str | None = Field(default=None, pattern=r"^[0-9]{8,32}$")
     intervalMinutes: int = Field(default=DEFAULT_MONITOR_INTERVAL_MINUTES, ge=1)
     prompt: str | None = None
     primaryMarket: str | None = None
@@ -64,6 +65,17 @@ class SubscriptionCreate(BaseModel):
             raise ValueError(f"platform must be one of {sorted(PLATFORMS)}")
         return value
 
+    @model_validator(mode="after")
+    def validate_trade_account_id(self) -> "SubscriptionCreate":
+        if self.platform in TRADE_PLATFORMS:
+            if self.accountId is None:
+                raise ValueError("accountId is required for private trade platforms")
+            if self.intervalMinutes != DEFAULT_MONITOR_INTERVAL_MINUTES:
+                raise ValueError("private trade platforms require a 10 minute interval")
+        elif self.accountId is not None:
+            raise ValueError("accountId is only valid for private trade platforms")
+        return self
+
     @field_validator("markets")
     @classmethod
     def validate_markets(cls, values: list[str]) -> list[str]:
@@ -81,6 +93,8 @@ class SubscriptionCreate(BaseModel):
 
 
 class SubscriptionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     intervalMinutes: int | None = Field(default=None, ge=1)
     prompt: str | None = None
     systemPrompt: str | None = None
@@ -187,6 +201,8 @@ def _subscription_payload(db: Session, subscription: Subscription) -> dict:
         "id": subscription.id,
         "platform": subscription.platform,
         "handle": subscription.platform_handle,
+        "accountId": subscription.platform_account_id,
+        "visibility": subscription.visibility,
         "intervalMinutes": subscription.interval_minutes,
         "enabled": subscription.enabled,
         "checkpoint": subscription.checkpoint,
@@ -214,10 +230,15 @@ def create_subscription(
     _: str = Depends(require_admin),
 ) -> dict:
     handle = _normalize_handle(payload.platform, payload.handle)
+    identity_filter = (
+        Subscription.platform_account_id == payload.accountId
+        if payload.platform in TRADE_PLATFORMS
+        else Subscription.platform_handle == handle
+    )
     existing = db.scalar(
         select(Subscription).where(
             Subscription.platform == payload.platform,
-            Subscription.platform_handle == handle,
+            identity_filter,
         )
     )
     if existing is not None and existing.deleted_at is None:
@@ -245,6 +266,11 @@ def create_subscription(
 
     if existing is not None:
         existing.kol_profile_id = kol.id
+        existing.platform_account_id = payload.accountId
+        existing.platform_handle = handle
+        existing.visibility = (
+            "private" if payload.platform in TRADE_PLATFORMS else "public"
+        )
         existing.interval_minutes = payload.intervalMinutes
         existing.prompt = payload.prompt
         existing.system_prompt = system_prompt
@@ -274,7 +300,9 @@ def create_subscription(
     subscription = Subscription(
         kol_profile_id=kol.id,
         platform=payload.platform,
+        platform_account_id=payload.accountId,
         platform_handle=handle,
+        visibility="private" if payload.platform in TRADE_PLATFORMS else "public",
         interval_minutes=payload.intervalMinutes,
         prompt=payload.prompt,
         system_prompt=system_prompt,
@@ -314,6 +342,14 @@ def update_subscription(
     if subscription is None or subscription.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Subscription not found")
     if payload.intervalMinutes is not None:
+        if (
+            subscription.platform in TRADE_PLATFORMS
+            and payload.intervalMinutes != DEFAULT_MONITOR_INTERVAL_MINUTES
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="private trade platforms require a 10 minute interval",
+            )
         subscription.interval_minutes = payload.intervalMinutes
     if payload.prompt is not None:
         subscription.prompt = payload.prompt

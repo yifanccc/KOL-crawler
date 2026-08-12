@@ -34,17 +34,26 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
     with engine.begin() as connection:
         connection.execute(
             Subscription.__table__.insert(),
-            [
-                {
-                    "platform": "x",
-                    "platform_handle": "senerity",
-                    "interval_minutes": 1,
-                    "enabled": True,
-                    "system_prompt": "private prompt",
-                    "user_prompt": "private user prompt",
-                    "output_schema_json": '{"private": true}',
-                }
-            ],
+            {
+                "platform": "x",
+                "platform_handle": "senerity",
+                "interval_minutes": 1,
+                "enabled": True,
+                "system_prompt": "private prompt",
+                "user_prompt": "private user prompt",
+                "output_schema_json": '{"private": true}',
+            },
+        )
+        connection.execute(
+            Subscription.__table__.insert(),
+            {
+                "platform": "binance_copy",
+                "platform_account_id": "5075281354358777856",
+                "platform_handle": "熬鹰资本",
+                "visibility": "private",
+                "interval_minutes": 10,
+                "enabled": True,
+            },
         )
 
     heartbeat = {
@@ -72,13 +81,22 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
     assert config.json()["pollSeconds"] == 60
     subscriptions = config.json()["subscriptions"]
     assert all(
-        set(subscription) == {"id", "platform", "handle", "intervalMinutes", "enabled"}
+        set(subscription)
+        == {"id", "platform", "handle", "accountId", "intervalMinutes", "enabled"}
         for subscription in subscriptions
     )
-    target = next(subscription for subscription in subscriptions if subscription["handle"] == "senerity")
-    assert target["platform"] == "x"
-    assert target["intervalMinutes"] == 1
-    assert target["enabled"] is True
+    trade_target = next(
+        subscription
+        for subscription in subscriptions
+        if subscription["platform"] == "binance_copy"
+    )
+    assert trade_target["accountId"] == "5075281354358777856"
+    regular_target = next(
+        subscription for subscription in subscriptions if subscription["platform"] == "x"
+    )
+    assert regular_target["accountId"] is None
+    assert regular_target["intervalMinutes"] == 1
+    assert regular_target["enabled"] is True
     assert first.status_code == 200
     assert second.status_code == 200
     assert mismatched.status_code == 403
