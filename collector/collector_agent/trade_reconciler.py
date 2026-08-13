@@ -25,6 +25,8 @@ def _active_position(
     record: NormalizedTradeRecord,
     quantity: Decimal | None,
     history_complete: bool,
+    entry_price: Decimal | None,
+    leverage: Decimal | None,
 ) -> PositionEstimate:
     if record.position_side not in {"LONG", "SHORT"}:
         return _unknown_position(record)
@@ -36,6 +38,8 @@ def _active_position(
         confidence=_confidence(quantity, history_complete),
         status="ACTIVE",
         as_of_event_time=record.event_time,
+        entry_price=entry_price,
+        leverage=leverage,
     )
 
 
@@ -69,6 +73,25 @@ def _position_key(record: NormalizedTradeRecord) -> PositionKey:
     return (record.symbol, record.position_side)
 
 
+def _weighted_entry_price(
+    current: PositionEstimate,
+    record: NormalizedTradeRecord,
+) -> Decimal | None:
+    if (
+        current.quantity is None
+        or current.entry_price is None
+        or record.quantity is None
+        or record.price is None
+    ):
+        return None
+    new_quantity = current.quantity + record.quantity
+    if new_quantity <= 0:
+        return None
+    return (
+        current.quantity * current.entry_price + record.quantity * record.price
+    ) / new_quantity
+
+
 def _apply_record(
     record: NormalizedTradeRecord,
     positions: dict[PositionKey, PositionEstimate],
@@ -78,7 +101,13 @@ def _apply_record(
     current = positions.get(key)
 
     if record.operation == "OPEN":
-        position = _active_position(record, record.quantity, history_complete)
+        position = _active_position(
+            record,
+            record.quantity,
+            history_complete,
+            record.price,
+            record.leverage,
+        )
         action: TradeEventAction = "OPEN"
     elif record.operation in {"ADD", "INCREASE"}:
         if current is None or current.status == "FLAT":
@@ -86,7 +115,13 @@ def _apply_record(
                 position = _unknown_position(record)
                 action = "ADD"
             else:
-                position = _active_position(record, record.quantity, history_complete)
+                position = _active_position(
+                    record,
+                    record.quantity,
+                    history_complete,
+                    record.price,
+                    record.leverage,
+                )
                 action = "OPEN"
         elif current.status != "ACTIVE" or current.side != record.position_side:
             position = _unknown_position(record)
@@ -97,14 +132,26 @@ def _apply_record(
                 if current.quantity is not None and record.quantity is not None
                 else None
             )
-            position = _active_position(record, quantity, history_complete)
+            position = _active_position(
+                record,
+                quantity,
+                history_complete,
+                _weighted_entry_price(current, record),
+                record.leverage if record.leverage is not None else current.leverage,
+            )
             action = "ADD"
     elif record.operation in {"REDUCE", "DECREASE"}:
         action = "REDUCE"
         if current is None or current.status != "ACTIVE":
             position = _unknown_position(record)
         elif current.quantity is None or record.quantity is None:
-            position = _active_position(record, None, history_complete)
+            position = _active_position(
+                record,
+                None,
+                history_complete,
+                current.entry_price,
+                current.leverage,
+            )
         elif record.quantity > current.quantity:
             position = _unknown_position(record)
         elif record.quantity == current.quantity:
@@ -112,7 +159,11 @@ def _apply_record(
             action = "CLOSE"
         else:
             position = _active_position(
-                record, current.quantity - record.quantity, history_complete
+                record,
+                current.quantity - record.quantity,
+                history_complete,
+                current.entry_price,
+                current.leverage,
             )
     elif record.operation == "CLOSE":
         position = _flat_position(record, history_complete)
@@ -139,7 +190,13 @@ def _apply_record(
                     status="FLAT",
                     as_of_event_time=record.event_time,
                 )
-            position = _active_position(record, record.quantity, history_complete)
+            position = _active_position(
+                record,
+                record.quantity,
+                history_complete,
+                record.price,
+                record.leverage,
+            )
         action = "REVERSE"
     else:
         raise ValueError(f"unsupported trade operation: {record.operation}")
@@ -224,6 +281,8 @@ def build_collected_post(target: ProviderTarget, event: TradeEvent) -> Collected
         "positionAfter": {
             "side": position.side,
             "quantity": _decimal_text(position.quantity),
+            "entryPrice": _decimal_text(position.entry_price),
+            "leverage": _decimal_text(position.leverage),
             "confidence": position.confidence,
             "status": position.status,
         },

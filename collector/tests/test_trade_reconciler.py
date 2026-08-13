@@ -51,6 +51,24 @@ def test_reconcile_explicit_operations_with_decimal_quantity() -> None:
     assert closed_position.status == "FLAT"
 
 
+def test_reconcile_tracks_weighted_entry_price_and_preserves_it_on_reduce() -> None:
+    reconciliation = reconcile_records(
+        [
+            sample_record("1", "OPEN", "LONG", "0.10", price="50000"),
+            sample_record("2", "ADD", "LONG", "0.05", price="53000"),
+            sample_record("3", "REDUCE", "LONG", "0.04", price="54000"),
+        ],
+        history_complete=True,
+    )
+
+    added = reconciliation.events[1].position_after
+    reduced = reconciliation.position_for("BTCUSDT", "LONG")
+    assert added.entry_price == Decimal("51000")
+    assert added.leverage == Decimal("10")
+    assert reduced.entry_price == Decimal("51000")
+    assert reduced.leverage == Decimal("10")
+
+
 def test_reconcile_directional_changes_infers_user_visible_actions() -> None:
     reconciliation = reconcile_records(
         [
@@ -175,6 +193,8 @@ def test_build_collected_post_serializes_decimal_contract_and_rejects_unsafe_sou
         "positionAfter": {
             "side": "LONG",
             "quantity": "0.10",
+            "entryPrice": "50000",
+            "leverage": "10",
             "confidence": "HIGH",
             "status": "ACTIVE",
         },

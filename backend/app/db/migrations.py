@@ -39,6 +39,15 @@ MIGRATION_COLUMNS = {
         "avatar_url": "VARCHAR(1024) NULL",
         "platform": "VARCHAR(32) NULL",
     },
+    "position_estimates": {
+        "entry_price": "VARCHAR(64) NULL",
+        "mark_price": "VARCHAR(64) NULL",
+        "notional": "VARCHAR(64) NULL",
+        "leverage": "VARCHAR(64) NULL",
+        "position_margin": "VARCHAR(64) NULL",
+        "estimated_pnl": "VARCHAR(64) NULL",
+        "price_updated_at": "DATETIME NULL",
+    },
 }
 
 

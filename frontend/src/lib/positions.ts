@@ -30,3 +30,53 @@ export function summarizePositions(positions: PositionSnapshot[]) {
     ).length,
   };
 }
+
+function decimalNumber(value?: string): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function moneyText(value?: string): string {
+  const parsed = decimalNumber(value);
+  if (parsed === null) return "数据源未提供";
+  return `${new Intl.NumberFormat("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(parsed)} USDT`;
+}
+
+export function pnlText(value?: string): string {
+  const parsed = decimalNumber(value);
+  if (parsed === null) return "数据源未提供";
+  const prefix = parsed > 0 ? "+" : "";
+  return `${prefix}${new Intl.NumberFormat("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(parsed)} USDT`;
+}
+
+export function priceText(value?: string): string {
+  const parsed = decimalNumber(value);
+  if (parsed === null) return "数据源未提供";
+  return new Intl.NumberFormat("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 8,
+  }).format(parsed);
+}
+
+export function quantityText(value?: string): string {
+  const parsed = decimalNumber(value);
+  if (parsed === null) return "数据源未提供";
+  return new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: 8,
+  }).format(parsed);
+}
+
+export function leverageText(value?: string): string {
+  const parsed = decimalNumber(value);
+  if (parsed === null) return "数据源未提供";
+  return `${new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: 2,
+  }).format(parsed)}x`;
+}

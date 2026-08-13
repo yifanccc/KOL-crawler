@@ -118,7 +118,7 @@ export default function KolsPage() {
         <BellRing size={18} aria-hidden="true" />
         <div>
           <strong>订阅新的 KOL</strong>
-          <p>配置抓取间隔、分析 Prompt 和 ntfy 推送。</p>
+          <p>在设置中统一配置内容订阅、Binance Copy 与 ntfy 推送。</p>
         </div>
         <Link href="/admin">管理订阅 <ArrowUpRight size={14} aria-hidden="true" /></Link>
       </section>

@@ -42,10 +42,12 @@ class PositionAfter(BaseModel):
 
     side: Literal["LONG", "SHORT", "FLAT", "UNKNOWN"]
     quantity: Decimal | None
+    entry_price: Decimal | None = Field(default=None, alias="entryPrice")
+    leverage: Decimal | None = None
     confidence: Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
     status: Literal["ACTIVE", "FLAT", "UNKNOWN", "STALE"]
 
-    @field_validator("quantity", mode="before")
+    @field_validator("quantity", "entry_price", "leverage", mode="before")
     @classmethod
     def validate_decimal_string(cls, value: Any) -> Any:
         return _decimal_string(value)

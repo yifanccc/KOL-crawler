@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -88,6 +88,19 @@ class PositionEstimate:
     status: PositionStatus
     as_of_event_time: datetime | None
     stale_since: datetime | None = None
+    entry_price: Decimal | None = None
+    leverage: Decimal | None = None
+    mark_price: Decimal | None = None
+    notional: Decimal | None = None
+    position_margin: Decimal | None = None
+    estimated_pnl: Decimal | None = None
+    price_updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class TradeAccountSnapshot:
+    margin_balance: Decimal | None
+    observed_at: datetime
 
 
 @dataclass(frozen=True)
@@ -113,4 +126,6 @@ class TradeRecordFetchResult:
     records: list[NormalizedTradeRecord]
     candidate_checkpoint: str | None
     history_complete: bool
+    account_snapshot: TradeAccountSnapshot | None = None
+    mark_prices: dict[str, Decimal] = field(default_factory=dict)
     kind: Literal["trade_records"] = "trade_records"

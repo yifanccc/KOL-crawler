@@ -39,3 +39,25 @@ def test_api_client_replaces_subscription_position_snapshot():
             {"agentId": "home", "positions": positions},
         )
     ]
+
+
+def test_api_client_replaces_complete_position_monitor_snapshot():
+    http = Http()
+    client = CollectorApiClient("https://api.example", "token", http)
+    account = {"marginBalance": "1000", "updatedAt": "2026-08-12T10:00:00Z"}
+    operations = [{"sourceRecordId": "1", "action": "OPEN"}]
+
+    client.replace_positions(
+        "home",
+        21,
+        [],
+        account=account,
+        operations=operations,
+    )
+
+    assert http.calls[-1][3] == {
+        "agentId": "home",
+        "account": account,
+        "positions": [],
+        "operations": operations,
+    }

@@ -18,12 +18,22 @@ class CollectorApiClient:
         return response.json()
 
     def replace_positions(
-        self, agent_id: str, subscription_id: int, positions: list[dict]
+        self,
+        agent_id: str,
+        subscription_id: int,
+        positions: list[dict],
+        account: dict | None = None,
+        operations: list[dict] | None = None,
     ) -> dict:
+        payload = {"agentId": agent_id, "positions": positions}
+        if account is not None:
+            payload["account"] = account
+        if operations is not None:
+            payload["operations"] = operations
         response = self.http.put(
             f"{self.base_url}/api/v1/collector/subscriptions/{subscription_id}/positions",
             headers=self.headers,
-            json={"agentId": agent_id, "positions": positions},
+            json=payload,
         )
         response.raise_for_status()
         return response.json()

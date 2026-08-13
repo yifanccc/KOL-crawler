@@ -1,6 +1,6 @@
-import { BinanceCopySettings } from "@/components/BinanceCopySettings";
+import { redirect } from "next/navigation";
 
 
 export default function BinanceCopySettingsPage() {
-  return <BinanceCopySettings />;
+  redirect("/admin");
 }

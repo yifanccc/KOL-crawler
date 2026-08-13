@@ -18,8 +18,17 @@ class Api:
 
     def fetch_config(self): return {"agentId": "home", "pollSeconds": 60, "subscriptions": [{"id": 1, "platform": "x", "handle": "one", "intervalMinutes": 1, "enabled": True}, {"id": 2, "platform": "x", "handle": "two", "intervalMinutes": 2, "enabled": True}]}
     def upload(self, agent_id, posts): return {"items": [{"externalId": post["externalId"], "status": "accepted"} for post in posts]}
-    def replace_positions(self, agent_id, subscription_id, positions):
-        self.position_replacements.append((agent_id, subscription_id, positions))
+    def replace_positions(
+        self,
+        agent_id,
+        subscription_id,
+        positions,
+        account=None,
+        operations=None,
+    ):
+        self.position_replacements.append(
+            (agent_id, subscription_id, positions, account, operations)
+        )
         return {"count": len(positions)}
     def heartbeat(self, payload): self.heartbeats.append(payload); return {}
 
@@ -342,6 +351,8 @@ def test_scheduler_creates_trade_baseline_with_fixed_account_target(tmp_path, ca
     assert api.position_replacements[0][0:2] == ("home", 21)
     assert api.position_replacements[0][2][0]["symbol"] == "BTCUSDT"
     assert api.position_replacements[0][2][0]["status"] == "ACTIVE"
+    assert api.position_replacements[0][3] is None
+    assert api.position_replacements[0][4][0]["action"] == "OPEN"
     assert scheduler.next_check[21] == now + timedelta(minutes=10)
     assert "status=baseline_created" in capsys.readouterr().out
 

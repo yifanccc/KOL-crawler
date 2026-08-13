@@ -5,11 +5,13 @@ const api = await import("../src/lib/api.ts");
 const platforms = await import("../src/lib/platforms.ts");
 
 
-test("generic settings exclude private trade platforms", () => {
+test("settings exposes every subscription platform through one entry", () => {
   assert.deepEqual(
-    platforms.contentPlatforms(["x", "binance_copy", "binance_square"]),
-    ["x", "binance_square"],
+    platforms.configurablePlatforms(["x", "binance_copy", "binance_square"]),
+    ["x", "binance_copy", "binance_square"],
   );
+  assert.equal(platforms.requiresPromptConfiguration("binance_copy"), false);
+  assert.equal(platforms.requiresPromptConfiguration("x"), true);
 });
 
 test("Binance Copy create payload has no model or prompt fields", () => {

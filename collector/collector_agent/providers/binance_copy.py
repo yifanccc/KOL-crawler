@@ -1,7 +1,7 @@
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
 import httpx
@@ -10,6 +10,7 @@ from collector_agent.models import ProviderTarget
 from collector_agent.providers.base import ProviderHealth, TradeHistoryGap
 from collector_agent.trade_models import (
     NormalizedTradeRecord,
+    TradeAccountSnapshot,
     TradeCheckpoint,
     TradeOperation,
     TradeRecordFetchResult,
@@ -20,6 +21,11 @@ BINANCE_COPY_URL = (
     "https://www.binance.com/bapi/futures/v1/friendly/future/"
     "copy-trade/lead-portfolio/order-history"
 )
+BINANCE_COPY_DETAIL_URL = (
+    "https://www.binance.com/bapi/futures/v1/friendly/future/"
+    "copy-trade/lead-portfolio/detail"
+)
+BINANCE_MARK_PRICE_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
 OVERLAP_RECORDS = 100
 WINDOW_DAYS = 30
 MAX_RESPONSE_BYTES = 2_000_000
@@ -100,6 +106,10 @@ class BinanceCopyProvider:
                 )
                 raise TradeHistoryGap("Binance Copy checkpoint is outside the overlap window")
 
+        account_snapshot = self._fetch_account_snapshot(target, observed_at)
+        symbols = {record.symbol for record in records}
+        mark_prices = self._fetch_mark_prices(symbols) if symbols else {}
+
         candidate_checkpoint = checkpoint
         if records:
             latest = records[-1]
@@ -107,12 +117,75 @@ class BinanceCopyProvider:
                 event_time=latest.event_time,
                 record_id=latest.source_record_id,
             ).encode()
-        self._health = ProviderHealth("healthy")
+        missing = []
+        if account_snapshot is None:
+            missing.append("margin balance")
+        if symbols and set(mark_prices) != symbols:
+            missing.append("mark prices")
+        self._health = ProviderHealth(
+            "healthy",
+            f"Supplemental data unavailable: {', '.join(missing)}" if missing else None,
+        )
         return TradeRecordFetchResult(
             records=records,
             candidate_checkpoint=candidate_checkpoint,
             history_complete=False,
+            account_snapshot=account_snapshot,
+            mark_prices=mark_prices,
         )
+
+    def _fetch_account_snapshot(
+        self,
+        target: ProviderTarget,
+        observed_at: datetime,
+    ) -> TradeAccountSnapshot | None:
+        try:
+            response = self.http.get(
+                BINANCE_COPY_DETAIL_URL,
+                params={"portfolioId": target.account_id},
+            )
+            response.raise_for_status()
+            if len(response.content) > MAX_RESPONSE_BYTES:
+                return None
+            payload = json.loads(response.text, parse_float=Decimal)
+            if (
+                not isinstance(payload, dict)
+                or payload.get("code") != "000000"
+                or payload.get("success") is not True
+                or not isinstance(payload.get("data"), dict)
+            ):
+                return None
+            data = payload["data"]
+            if str(data.get("leadPortfolioId")) != target.account_id:
+                return None
+            margin_balance = _decimal_input(data.get("marginBalance"), positive=False)
+        except (httpx.HTTPError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            return None
+        return TradeAccountSnapshot(
+            margin_balance=margin_balance,
+            observed_at=observed_at,
+        )
+
+    def _fetch_mark_prices(self, symbols: set[str]) -> dict[str, Decimal]:
+        try:
+            response = self.http.get(BINANCE_MARK_PRICE_URL)
+            response.raise_for_status()
+            if len(response.content) > MAX_RESPONSE_BYTES:
+                return {}
+            payload = json.loads(response.text, parse_float=Decimal)
+            if not isinstance(payload, list) or len(payload) > 5000:
+                return {}
+            prices: dict[str, Decimal] = {}
+            for row in payload:
+                if not isinstance(row, dict):
+                    raise ValueError("mark price row must be an object")
+                symbol = row.get("symbol")
+                if symbol not in symbols:
+                    continue
+                prices[symbol] = _decimal_input(row.get("markPrice"), positive=True)
+            return prices
+        except (httpx.HTTPError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            return {}
 
     def _normalize_response(
         self,
@@ -264,6 +337,20 @@ def _decimal_value(
         raise ValueError("trade decimal must be positive")
     if not positive and not allow_negative and decimal_value < 0:
         raise ValueError("trade decimal cannot be negative")
+    return decimal_value
+
+
+def _decimal_input(value: Any, *, positive: bool) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
+        raise ValueError("decimal input is invalid")
+    try:
+        decimal_value = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("decimal input is invalid") from exc
+    if not decimal_value.is_finite():
+        raise ValueError("decimal input must be finite")
+    if (positive and decimal_value <= 0) or (not positive and decimal_value < 0):
+        raise ValueError("decimal input is out of range")
     return decimal_value
 
 

@@ -4,7 +4,18 @@ from sqlalchemy import select
 
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
-from app.models import Asset, NotificationEvent, NotificationRule, RawPost, Signal, SignalAsset
+from app.models import (
+    Asset,
+    KolProfile,
+    NotificationEvent,
+    NotificationRule,
+    PositionAccountSnapshot,
+    PositionEstimate,
+    RawPost,
+    Signal,
+    SignalAsset,
+    Subscription,
+)
 from app.services.notifications import NtfyClient, _format_notification, dispatch_notifications
 
 
@@ -173,6 +184,116 @@ def test_notification_uses_binance_copy_platform_label() -> None:
         session.close()
 
     assert title == "Binance Copy | 熬鹰资本 | 2026-08-09 08:00"
+
+
+def test_binance_copy_notification_contains_operation_symbol_position_and_kol_summary() -> None:
+    reset_database()
+    session = SessionLocal()
+    try:
+        kol = KolProfile(platform="binance_copy", display_name="熬鹰资本")
+        session.add(kol)
+        session.flush()
+        subscription = Subscription(
+            kol_profile_id=kol.id,
+            platform="binance_copy",
+            platform_account_id="5075281354358777856",
+            platform_handle="熬鹰资本",
+            visibility="private",
+            interval_minutes=10,
+        )
+        session.add(subscription)
+        session.flush()
+        session.add(
+            PositionAccountSnapshot(
+                subscription_id=subscription.id,
+                margin_balance="137889.65",
+                source_updated_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
+            )
+        )
+        session.add(
+            PositionEstimate(
+                subscription_id=subscription.id,
+                symbol="BTCUSDT",
+                position_side="LONG",
+                side="LONG",
+                quantity="0.15",
+                entry_price="51000",
+                mark_price="52000",
+                notional="7800.00",
+                leverage="10",
+                position_margin="780.00",
+                estimated_pnl="150.00",
+                confidence="LOW",
+                status="ACTIVE",
+                source_updated_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
+                price_updated_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
+            )
+        )
+        payload = {
+            "schemaVersion": 1,
+            "platform": "binance_copy",
+            "accountId": "5075281354358777856",
+            "sourceRecordId": "2",
+            "revision": "r1",
+            "action": "ADD",
+            "effectiveAction": "INCREASE",
+            "symbol": "BTCUSDT",
+            "positionSide": "LONG",
+            "quantity": "0.05",
+            "price": "53000",
+            "leverage": "10",
+            "eventTime": "2026-08-09T01:02:00Z",
+            "positionAfter": {
+                "side": "LONG",
+                "quantity": "0.15",
+                "entryPrice": "51000",
+                "leverage": "10",
+                "confidence": "LOW",
+                "status": "ACTIVE",
+            },
+            "sourceRecord": {"totalPnl": "0"},
+        }
+        raw_post = RawPost(
+            subscription_id=subscription.id,
+            platform="binance_copy",
+            external_id="5075281354358777856:2:r1",
+            author_name="熬鹰资本",
+            published_at=datetime(2026, 8, 9, 1, 2, tzinfo=UTC),
+            raw_text="BTCUSDT 加仓",
+            raw_json=__import__("json").dumps(payload),
+        )
+        session.add(raw_post)
+        session.flush()
+        signal = Signal(
+            subscription_id=subscription.id,
+            raw_post_id=raw_post.id,
+            actionable=True,
+            stance="bullish",
+            stance_cn="多",
+            summary="BTCUSDT 加仓",
+            symbols_json='["BTCUSDT"]',
+            structured_status="deterministic",
+        )
+        session.add(signal)
+        session.flush()
+
+        title, message = _format_notification(session, signal)
+    finally:
+        session.close()
+
+    assert title == "Binance Copy | 熬鹰资本 | 2026-08-09 09:02"
+    assert "操作：BTCUSDT 加仓 多" in message
+    assert "成交价格 53,000.00" in message
+    assert "成交数量 0.05" in message
+    assert "操作金额 2,650.00 USDT" in message
+    assert "品种当前：多 0.15" in message
+    assert "开仓 51,000.00" in message
+    assert "现价 52,000.00" in message
+    assert "预计盈亏 +150.00 USDT" in message
+    assert "KOL 当前：保证金 137,889.65 USDT" in message
+    assert "持仓总额 7,800.00 USDT" in message
+    assert "持仓保证金 780.00 USDT" in message
+    assert "有效杠杆 10x" in message
 
 
 def test_repeated_dispatch_creates_one_event_and_one_publish_call() -> None:

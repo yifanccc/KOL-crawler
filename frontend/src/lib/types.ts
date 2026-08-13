@@ -132,9 +132,60 @@ export interface PositionSnapshot {
   positionSide: "LONG" | "SHORT" | "UNKNOWN";
   side: "LONG" | "SHORT" | "FLAT" | "UNKNOWN";
   quantity?: string;
+  entryPrice?: string;
+  currentPrice?: string;
+  notional?: string;
+  leverage?: string;
+  positionMargin?: string;
+  estimatedPnl?: string;
+  priceUpdatedAt?: string;
   confidence: "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
   status: "ACTIVE" | "FLAT" | "UNKNOWN" | "STALE";
   asOfEventTime?: string;
   staleSince?: string;
   updatedAt: string;
+}
+
+export interface PositionKolSummary {
+  subscriptionId: number;
+  kolId: string;
+  kolName: string;
+  platform: string;
+  accountId: string;
+  marginBalance?: string;
+  totalPositionNotional?: string;
+  positionMargin?: string;
+  estimatedPnl?: string;
+  effectiveLeverage?: string;
+  activePositionCount: number;
+  uncertainPositionCount: number;
+  metricsStatus: "COMPLETE" | "PARTIAL" | "UNKNOWN";
+  updatedAt?: string;
+}
+
+export interface PositionKolDetail {
+  summary: PositionKolSummary;
+  positions: PositionSnapshot[];
+}
+
+export interface PositionOperation {
+  sourceRecordId: string;
+  revision: string;
+  action: "OPEN" | "ADD" | "REDUCE" | "CLOSE" | "REVERSE" | "CORRECTION";
+  effectiveAction: string;
+  symbol: string;
+  positionSide: "LONG" | "SHORT" | "UNKNOWN";
+  quantity?: string;
+  price?: string;
+  amount?: string;
+  leverage?: string;
+  realizedPnl?: string;
+  eventTime: string;
+}
+
+export interface PositionOperationPage {
+  items: PositionOperation[];
+  total: number;
+  limit: number;
+  offset: number;
 }

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -34,6 +35,13 @@ def initialize_trade_store(connection: sqlite3.Connection) -> None:
           position_side TEXT NOT NULL,
           side TEXT NOT NULL,
           quantity TEXT,
+          entry_price TEXT,
+          mark_price TEXT,
+          notional TEXT,
+          leverage TEXT,
+          position_margin TEXT,
+          estimated_pnl TEXT,
+          price_updated_at TEXT,
           confidence TEXT NOT NULL,
           status TEXT NOT NULL,
           as_of_event_time TEXT,
@@ -41,8 +49,29 @@ def initialize_trade_store(connection: sqlite3.Connection) -> None:
           updated_at TEXT NOT NULL,
           PRIMARY KEY(subscription_id, symbol, position_side)
         );
+        CREATE TABLE IF NOT EXISTS trade_account_snapshots (
+          subscription_id INTEGER PRIMARY KEY,
+          margin_balance TEXT,
+          updated_at TEXT NOT NULL
+        );
         """
     )
+    existing_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(position_estimates)")
+    }
+    for column in (
+        "entry_price",
+        "mark_price",
+        "notional",
+        "leverage",
+        "position_margin",
+        "estimated_pnl",
+        "price_updated_at",
+    ):
+        if column not in existing_columns:
+            connection.execute(
+                f"ALTER TABLE position_estimates ADD COLUMN {column} TEXT"
+            )
 
 
 def _datetime_text(value: datetime) -> str:
@@ -85,6 +114,43 @@ def _canonical_record(record: NormalizedTradeRecord) -> str:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("normalized trade record is not JSON-safe") from exc
+
+
+def _value_position(
+    position: PositionEstimate,
+    mark_price: Decimal | None,
+    price_updated_at: datetime | None,
+) -> PositionEstimate:
+    if (
+        position.status != "ACTIVE"
+        or position.quantity is None
+        or mark_price is None
+    ):
+        return replace(
+            position,
+            mark_price=mark_price,
+            price_updated_at=price_updated_at,
+        )
+    notional = abs(position.quantity * mark_price)
+    estimated_pnl = None
+    if position.entry_price is not None:
+        price_delta = (
+            mark_price - position.entry_price
+            if position.side == "LONG"
+            else position.entry_price - mark_price
+        )
+        estimated_pnl = price_delta * position.quantity
+    position_margin = None
+    if position.leverage is not None and position.leverage > 0:
+        position_margin = notional / position.leverage
+    return replace(
+        position,
+        mark_price=mark_price,
+        notional=notional,
+        position_margin=position_margin,
+        estimated_pnl=estimated_pnl,
+        price_updated_at=price_updated_at,
+    )
 
 
 def _record_from_row(row: sqlite3.Row) -> NormalizedTradeRecord:
@@ -196,23 +262,69 @@ def record_trade_fetch(
         if rows:
             records = [_record_from_row(row) for row in rows]
             reconciliation = reconcile_records(records, result.history_complete)
+            previous_prices = {
+                (row["symbol"], row["position_side"]): (
+                    Decimal(row["mark_price"])
+                    if row["mark_price"] is not None
+                    else None,
+                    _parse_datetime(row["price_updated_at"]),
+                )
+                for row in connection.execute(
+                    "SELECT symbol, position_side, mark_price, price_updated_at "
+                    "FROM position_estimates WHERE subscription_id = ?",
+                    (subscription_id,),
+                ).fetchall()
+            }
             connection.execute(
                 "DELETE FROM position_estimates WHERE subscription_id = ?",
                 (subscription_id,),
             )
             updated_at = _datetime_text(max(record.observed_at for record in records))
-            for position in reconciliation.positions.values():
+            valuation_time = (
+                result.account_snapshot.observed_at
+                if result.account_snapshot is not None
+                else max(record.observed_at for record in records)
+            )
+            for inferred_position in reconciliation.positions.values():
+                position_key = (
+                    inferred_position.symbol,
+                    inferred_position.position_side,
+                )
+                previous_mark, previous_mark_time = previous_prices.get(
+                    position_key, (None, None)
+                )
+                if inferred_position.symbol in result.mark_prices:
+                    mark_price = result.mark_prices[inferred_position.symbol]
+                    price_updated_at = valuation_time
+                else:
+                    mark_price = previous_mark
+                    price_updated_at = previous_mark_time
+                position = _value_position(
+                    inferred_position,
+                    mark_price,
+                    price_updated_at,
+                )
                 connection.execute(
                     "INSERT INTO position_estimates "
-                    "(subscription_id, symbol, position_side, side, quantity, confidence, "
-                    "status, as_of_event_time, stale_since, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(subscription_id, symbol, position_side, side, quantity, entry_price, "
+                    "mark_price, notional, leverage, position_margin, estimated_pnl, "
+                    "price_updated_at, confidence, status, as_of_event_time, stale_since, "
+                    "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         subscription_id,
                         position.symbol,
                         position.position_side,
                         position.side,
                         _decimal_text(position.quantity),
+                        _decimal_text(position.entry_price),
+                        _decimal_text(position.mark_price),
+                        _decimal_text(position.notional),
+                        _decimal_text(position.leverage),
+                        _decimal_text(position.position_margin),
+                        _decimal_text(position.estimated_pnl),
+                        _datetime_text(position.price_updated_at)
+                        if position.price_updated_at
+                        else None,
                         position.confidence,
                         position.status,
                         _datetime_text(position.as_of_event_time)
@@ -222,6 +334,19 @@ def record_trade_fetch(
                         if position.stale_since
                         else None,
                         updated_at,
+                    ),
+                )
+
+            if result.account_snapshot is not None:
+                connection.execute(
+                    "INSERT INTO trade_account_snapshots "
+                    "(subscription_id, margin_balance, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(subscription_id) DO UPDATE SET "
+                    "margin_balance = excluded.margin_balance, updated_at = excluded.updated_at",
+                    (
+                        subscription_id,
+                        _decimal_text(result.account_snapshot.margin_balance),
+                        _datetime_text(result.account_snapshot.observed_at),
                     ),
                 )
 
@@ -244,6 +369,19 @@ def record_trade_fetch(
                         ),
                     )
                     inserted_outbox += cursor.rowcount
+
+        if not rows and result.account_snapshot is not None:
+            connection.execute(
+                "INSERT INTO trade_account_snapshots "
+                "(subscription_id, margin_balance, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(subscription_id) DO UPDATE SET "
+                "margin_balance = excluded.margin_balance, updated_at = excluded.updated_at",
+                (
+                    subscription_id,
+                    _decimal_text(result.account_snapshot.margin_balance),
+                    _datetime_text(result.account_snapshot.observed_at),
+                ),
+            )
 
         if result.candidate_checkpoint is not None:
             connection.execute(
@@ -277,6 +415,8 @@ def mark_trade_positions_unknown(
     with connection:
         connection.execute(
             "UPDATE position_estimates SET side = 'UNKNOWN', quantity = NULL, "
+            "entry_price = NULL, notional = NULL, leverage = NULL, "
+            "position_margin = NULL, estimated_pnl = NULL, "
             "confidence = 'UNKNOWN', status = 'UNKNOWN', stale_since = ?, updated_at = ? "
             "WHERE subscription_id = ?",
             (timestamp, timestamp, subscription_id),
@@ -290,8 +430,9 @@ def position_for(
     position_side: TradePositionSide,
 ) -> PositionEstimate | None:
     row = connection.execute(
-        "SELECT symbol, position_side, side, quantity, confidence, status, "
-        "as_of_event_time, stale_since FROM position_estimates "
+        "SELECT symbol, position_side, side, quantity, entry_price, mark_price, "
+        "notional, leverage, position_margin, estimated_pnl, price_updated_at, "
+        "confidence, status, as_of_event_time, stale_since FROM position_estimates "
         "WHERE subscription_id = ? AND symbol = ? AND position_side = ?",
         (subscription_id, symbol, position_side),
     ).fetchone()
@@ -306,4 +447,85 @@ def position_for(
         status=row["status"],
         as_of_event_time=_parse_datetime(row["as_of_event_time"]),
         stale_since=_parse_datetime(row["stale_since"]),
+        entry_price=Decimal(row["entry_price"])
+        if row["entry_price"] is not None
+        else None,
+        leverage=Decimal(row["leverage"])
+        if row["leverage"] is not None
+        else None,
+        mark_price=Decimal(row["mark_price"])
+        if row["mark_price"] is not None
+        else None,
+        notional=Decimal(row["notional"])
+        if row["notional"] is not None
+        else None,
+        position_margin=Decimal(row["position_margin"])
+        if row["position_margin"] is not None
+        else None,
+        estimated_pnl=Decimal(row["estimated_pnl"])
+        if row["estimated_pnl"] is not None
+        else None,
+        price_updated_at=_parse_datetime(row["price_updated_at"]),
     )
+
+
+def account_snapshot_for(
+    connection: sqlite3.Connection,
+    subscription_id: int,
+) -> dict | None:
+    row = connection.execute(
+        "SELECT margin_balance, updated_at FROM trade_account_snapshots "
+        "WHERE subscription_id = ?",
+        (subscription_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "marginBalance": row["margin_balance"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def trade_operation_snapshots_for(
+    connection: sqlite3.Connection,
+    subscription_id: int,
+) -> list[dict]:
+    rows = connection.execute(
+        "SELECT normalized_json, last_observed_at FROM trade_events "
+        "WHERE subscription_id = ? ORDER BY event_time, source_record_id, revision",
+        (subscription_id,),
+    ).fetchall()
+    if not rows:
+        return []
+    reconciliation = reconcile_records(
+        [_record_from_row(row) for row in rows],
+        history_complete=False,
+    )
+    snapshots = []
+    for event in reconciliation.events:
+        record = event.record
+        realized_pnl = record.source_payload.get("totalPnl")
+        if not isinstance(realized_pnl, str):
+            realized_pnl = None
+        amount = (
+            record.quantity * record.price
+            if record.quantity is not None and record.price is not None
+            else None
+        )
+        snapshots.append(
+            {
+                "sourceRecordId": record.source_record_id,
+                "revision": record.revision,
+                "action": event.action,
+                "effectiveAction": record.operation,
+                "symbol": record.symbol,
+                "positionSide": record.position_side,
+                "quantity": _decimal_text(record.quantity),
+                "price": _decimal_text(record.price),
+                "amount": _decimal_text(amount),
+                "leverage": _decimal_text(record.leverage),
+                "realizedPnl": realized_pnl,
+                "eventTime": _datetime_text(record.event_time),
+            }
+        )
+    return snapshots[-2000:]

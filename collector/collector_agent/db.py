@@ -5,11 +5,13 @@ from pathlib import Path
 from collector_agent.models import CollectedPost, OutboxPost, ProviderTarget, collected_post_payload
 from collector_agent.trade_models import PositionEstimate, TradePositionSide, TradeRecordFetchResult
 from collector_agent.trade_store import (
+    account_snapshot_for,
     initialize_trade_store,
     mark_trade_positions_unknown,
     mark_trade_positions_stale,
     position_for,
     record_trade_fetch,
+    trade_operation_snapshots_for,
 )
 
 
@@ -70,8 +72,10 @@ class CollectorStore:
 
     def position_snapshots_for(self, subscription_id: int) -> list[dict]:
         rows = self.connection.execute(
-            "SELECT symbol, position_side, side, quantity, confidence, status, "
-            "as_of_event_time, stale_since, updated_at FROM position_estimates "
+            "SELECT symbol, position_side, side, quantity, entry_price, mark_price, "
+            "notional, leverage, position_margin, estimated_pnl, price_updated_at, "
+            "confidence, status, as_of_event_time, stale_since, updated_at "
+            "FROM position_estimates "
             "WHERE subscription_id = ? ORDER BY symbol, position_side",
             (subscription_id,),
         ).fetchall()
@@ -81,6 +85,13 @@ class CollectorStore:
                 "positionSide": row["position_side"],
                 "side": row["side"],
                 "quantity": row["quantity"],
+                "entryPrice": row["entry_price"],
+                "currentPrice": row["mark_price"],
+                "notional": row["notional"],
+                "leverage": row["leverage"],
+                "positionMargin": row["position_margin"],
+                "estimatedPnl": row["estimated_pnl"],
+                "priceUpdatedAt": row["price_updated_at"],
                 "confidence": row["confidence"],
                 "status": row["status"],
                 "asOfEventTime": row["as_of_event_time"],
@@ -89,6 +100,12 @@ class CollectorStore:
             }
             for row in rows
         ]
+
+    def account_snapshot_for(self, subscription_id: int) -> dict | None:
+        return account_snapshot_for(self.connection, subscription_id)
+
+    def trade_operation_snapshots_for(self, subscription_id: int) -> list[dict]:
+        return trade_operation_snapshots_for(self.connection, subscription_id)
 
     def pending_posts(self, limit: int = 100) -> list[OutboxPost]:
         rows = self.connection.execute("SELECT id, subscription_id, external_id, payload_json FROM outbox_posts WHERE status = 'pending' ORDER BY id LIMIT ?", (limit,)).fetchall()

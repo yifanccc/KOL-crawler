@@ -34,6 +34,8 @@ def sample_record(
     revision: str = "r1",
     observed_minute: int = 0,
     symbol: str = "BTCUSDT",
+    price: str = "50000",
+    leverage: str | None = "10",
 ) -> NormalizedTradeRecord:
     return NormalizedTradeRecord(
         platform="binance_copy",
@@ -44,8 +46,8 @@ def sample_record(
         symbol=symbol,
         position_side=side,
         quantity=Decimal(quantity) if quantity is not None else None,
-        price=Decimal("50000"),
-        leverage=Decimal("10"),
+        price=Decimal(price),
+        leverage=Decimal(leverage) if leverage is not None else None,
         event_time=datetime(2026, 8, 9, 1, int(record_id), tzinfo=UTC),
         observed_at=datetime(2026, 8, 9, 2, observed_minute, tzinfo=UTC),
         source_url=None,

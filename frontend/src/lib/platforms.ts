@@ -14,6 +14,10 @@ export function requiresAccountId(platform: string): boolean {
   return ACCOUNT_ID_PLATFORMS.has(platform.toLowerCase());
 }
 
-export function contentPlatforms(platforms: string[]): string[] {
-  return platforms.filter((platform) => !requiresAccountId(platform));
+export function configurablePlatforms(platforms: string[]): string[] {
+  return [...platforms];
+}
+
+export function requiresPromptConfiguration(platform: string): boolean {
+  return !requiresAccountId(platform);
 }

@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -7,7 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Asset, NotificationEvent, NotificationRule, RawPost, Signal, SignalAsset
+from app.models import (
+    Asset,
+    KolProfile,
+    NotificationEvent,
+    NotificationRule,
+    PositionAccountSnapshot,
+    PositionEstimate,
+    RawPost,
+    Signal,
+    SignalAsset,
+    Subscription,
+)
+from app.services.position_monitor import position_summary_payload
+from app.services.trade_structurer import TradePayload
 
 CONFIDENCE_RANK = {"低": 1, "中": 2, "高": 3, None: 0}
 PLATFORM_LABELS = {
@@ -79,6 +93,124 @@ def _asset_markets(session: Session, signal: Signal) -> list[str]:
     )
 
 
+def _money(value: Decimal | str | None, *, signed: bool = False) -> str:
+    if value is None:
+        return "数据源未提供"
+    decimal_value = value if isinstance(value, Decimal) else Decimal(value)
+    sign = "+" if signed and decimal_value > 0 else ""
+    return f"{sign}{decimal_value:,.2f} USDT"
+
+
+def _number(value: Decimal | str | None, decimals: int = 2) -> str:
+    if value is None:
+        return "数据源未提供"
+    decimal_value = value if isinstance(value, Decimal) else Decimal(value)
+    return f"{decimal_value:,.{decimals}f}"
+
+
+def _quantity(value: Decimal | str | None) -> str:
+    if value is None:
+        return "数据源未提供"
+    decimal_value = value if isinstance(value, Decimal) else Decimal(value)
+    return format(decimal_value.normalize(), "f")
+
+
+def _trade_notification(
+    session: Session,
+    signal: Signal,
+    raw_post: RawPost,
+) -> str | None:
+    if raw_post.raw_json is None or signal.subscription_id is None:
+        return None
+    try:
+        trade = TradePayload.model_validate_json(raw_post.raw_json)
+    except ValueError:
+        return None
+    subscription = session.get(Subscription, signal.subscription_id)
+    if subscription is None or subscription.kol_profile_id is None:
+        return None
+    kol = session.get(KolProfile, subscription.kol_profile_id)
+    if kol is None:
+        return None
+    positions = list(
+        session.scalars(
+            select(PositionEstimate).where(
+                PositionEstimate.subscription_id == subscription.id
+            )
+        ).all()
+    )
+    account = session.get(PositionAccountSnapshot, subscription.id)
+    summary = position_summary_payload(subscription, kol, account, positions)
+    current = next(
+        (
+            position
+            for position in positions
+            if position.symbol == trade.symbol
+            and position.position_side == trade.position_side
+        ),
+        None,
+    )
+    action_labels = {
+        "OPEN": "开仓",
+        "ADD": "加仓",
+        "REDUCE": "减仓",
+        "CLOSE": "平仓",
+        "REVERSE": "反手",
+        "CORRECTION": "交易修订",
+    }
+    side_labels = {
+        "LONG": "多",
+        "SHORT": "空",
+        "FLAT": "空仓",
+        "UNKNOWN": "未知",
+    }
+    amount = (
+        trade.quantity * trade.price
+        if trade.quantity is not None and trade.price is not None
+        else None
+    )
+    current_side = (
+        side_labels.get(current.side, current.side)
+        if current is not None
+        else side_labels.get(trade.position_after.side, trade.position_after.side)
+    )
+    current_quantity = (
+        current.quantity if current is not None else trade.position_after.quantity
+    )
+    entry_price = (
+        current.entry_price if current is not None else trade.position_after.entry_price
+    )
+    leverage = summary["effectiveLeverage"]
+    leverage_text = (
+        f"{_quantity(leverage)}x" if leverage is not None else "数据源未提供"
+    )
+    return "\n".join(
+        [
+            (
+                f"操作：{trade.symbol} {action_labels[trade.action]} "
+                f"{side_labels[trade.position_side]}"
+            ),
+            (
+                f"成交价格 {_number(trade.price)}｜成交数量 {_quantity(trade.quantity)}｜"
+                f"操作金额 {_money(amount)}"
+            ),
+            f"品种当前：{current_side} {_quantity(current_quantity)}",
+            (
+                f"开仓 {_number(entry_price)}｜"
+                f"现价 {_number(current.mark_price if current else None)}｜"
+                f"预计盈亏 {_money(current.estimated_pnl if current else None, signed=True)}"
+            ),
+            f"KOL 当前：保证金 {_money(summary['marginBalance'])}",
+            (
+                f"持仓总额 {_money(summary['totalPositionNotional'])}｜"
+                f"持仓保证金 {_money(summary['positionMargin'])}｜"
+                f"预计盈亏 {_money(summary['estimatedPnl'], signed=True)}｜"
+                f"有效杠杆 {leverage_text}"
+            ),
+        ]
+    )
+
+
 def _format_notification(session: Session, signal: Signal) -> tuple[str, str]:
     raw_post = session.get(RawPost, signal.raw_post_id)
     platform = PLATFORM_LABELS.get(raw_post.platform, raw_post.platform) if raw_post else "未知平台"
@@ -90,6 +222,10 @@ def _format_notification(session: Session, signal: Signal) -> tuple[str, str]:
         published_text = published_at.astimezone(SHANGHAI).strftime("%Y-%m-%d %H:%M")
     else:
         published_text = "时间未知"
+    if raw_post is not None and raw_post.platform == "binance_copy":
+        trade_message = _trade_notification(session, signal, raw_post)
+        if trade_message is not None:
+            return f"{platform} | {kol_name} | {published_text}", trade_message
     symbols = _json_list(signal.symbols_json)
     summary = signal.summary_cn or signal.summary
     stance = signal.stance_cn or signal.stance

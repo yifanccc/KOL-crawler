@@ -21,20 +21,43 @@ def fixture_transport(payload: dict | None = None):
     response_payload = payload or json.loads(FIXTURE.read_text())
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
-        assert request.url == (
-            "https://www.binance.com/bapi/futures/v1/friendly/future/"
-            "copy-trade/lead-portfolio/order-history"
-        )
         assert "authorization" not in request.headers
         assert "cookie" not in request.headers
-        assert json.loads(request.content) == {
-            "portfolioId": "5075281354358777856",
-            "startTime": int((NOW - timedelta(days=30)).timestamp() * 1000),
-            "endTime": int(NOW.timestamp() * 1000),
-            "pageSize": 100,
-        }
-        return httpx.Response(200, json=response_payload)
+        if request.url.path.endswith("/order-history"):
+            assert request.method == "POST"
+            assert json.loads(request.content) == {
+                "portfolioId": "5075281354358777856",
+                "startTime": int((NOW - timedelta(days=30)).timestamp() * 1000),
+                "endTime": int(NOW.timestamp() * 1000),
+                "pageSize": 100,
+            }
+            return httpx.Response(200, json=response_payload)
+        if request.url.path.endswith("/lead-portfolio/detail"):
+            assert request.method == "GET"
+            assert dict(request.url.params) == {
+                "portfolioId": "5075281354358777856"
+            }
+            return httpx.Response(
+                200,
+                json={
+                    "code": "000000",
+                    "success": True,
+                    "data": {
+                        "leadPortfolioId": "5075281354358777856",
+                        "marginBalance": "137889.65601689",
+                    },
+                },
+            )
+        if request.url.path == "/fapi/v1/premiumIndex":
+            assert request.method == "GET"
+            return httpx.Response(
+                200,
+                json=[
+                    {"symbol": "BTCUSDT", "markPrice": "52000.25"},
+                    {"symbol": "ETHUSDT", "markPrice": "3200.5"},
+                ],
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
 
     return httpx.MockTransport(handler)
 
@@ -73,6 +96,13 @@ def test_binance_copy_provider_maps_fixture_to_stable_normalized_records() -> No
     assert result.records[0].leverage is None
     assert result.records[0].source_payload["executedQty"] == "0.25"
     assert result.records[0].source_payload["totalPnl"] == "0.0"
+    assert result.account_snapshot is not None
+    assert result.account_snapshot.margin_balance == Decimal("137889.65601689")
+    assert result.account_snapshot.observed_at == NOW
+    assert result.mark_prices == {
+        "BTCUSDT": Decimal("52000.25"),
+        "ETHUSDT": Decimal("3200.5"),
+    }
     assert result.history_complete is False
     assert TradeCheckpoint.decode(result.candidate_checkpoint).record_id == (
         result.records[-1].source_record_id

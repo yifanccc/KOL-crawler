@@ -158,6 +158,10 @@ class CollectorScheduler:
                             config["agentId"],
                             subscription_id,
                             self.store.position_snapshots_for(subscription_id),
+                            account=self.store.account_snapshot_for(subscription_id),
+                            operations=self.store.trade_operation_snapshots_for(
+                                subscription_id
+                            ),
                         )
                     except Exception as exc:
                         self.provider_failures[subscription["platform"]] = (

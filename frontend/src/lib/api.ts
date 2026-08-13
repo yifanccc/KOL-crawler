@@ -4,6 +4,10 @@ import type {
   Asset,
   CollectorHealth,
   Kol,
+  PositionKolDetail,
+  PositionKolSummary,
+  PositionOperation,
+  PositionOperationPage,
   PositionSnapshot,
   Signal,
   SignalAsset,
@@ -317,6 +321,19 @@ export function normalizePositions(value: unknown): PositionSnapshot[] {
           ? (text(item.side) as PositionSnapshot["side"])
           : "UNKNOWN",
         quantity: text(item.quantity) || undefined,
+        ...(text(item.entryPrice) ? { entryPrice: text(item.entryPrice) } : {}),
+        ...(text(item.currentPrice) ? { currentPrice: text(item.currentPrice) } : {}),
+        ...(text(item.notional) ? { notional: text(item.notional) } : {}),
+        ...(text(item.leverage) ? { leverage: text(item.leverage) } : {}),
+        ...(text(item.positionMargin)
+          ? { positionMargin: text(item.positionMargin) }
+          : {}),
+        ...(text(item.estimatedPnl)
+          ? { estimatedPnl: text(item.estimatedPnl) }
+          : {}),
+        ...(text(item.priceUpdatedAt)
+          ? { priceUpdatedAt: text(item.priceUpdatedAt) }
+          : {}),
         confidence: ["HIGH", "MEDIUM", "LOW", "UNKNOWN"].includes(
           text(item.confidence),
         )
@@ -337,6 +354,171 @@ export function normalizePositions(value: unknown): PositionSnapshot[] {
 
 export async function fetchPositions(): Promise<PositionSnapshot[]> {
   return normalizePositions(await getJson("/api/positions"));
+}
+
+function normalizePositionKolSummary(value: unknown): PositionKolSummary | null {
+  if (!isRecord(value)) return null;
+  const kol = isRecord(value.kol) ? value.kol : {};
+  const subscriptionId = numberValue(value.subscriptionId);
+  if (!subscriptionId) return null;
+  const metricsStatus = text(value.metricsStatus);
+  return {
+    subscriptionId,
+    kolId: idText(kol.id),
+    kolName: text(kol.displayName, "未知 KOL"),
+    platform: text(value.platform),
+    accountId: text(value.accountId),
+    marginBalance: text(value.marginBalance) || undefined,
+    totalPositionNotional: text(value.totalPositionNotional) || undefined,
+    positionMargin: text(value.positionMargin) || undefined,
+    estimatedPnl: text(value.estimatedPnl) || undefined,
+    effectiveLeverage: text(value.effectiveLeverage) || undefined,
+    activePositionCount: numberValue(value.activePositionCount) ?? 0,
+    uncertainPositionCount: numberValue(value.uncertainPositionCount) ?? 0,
+    metricsStatus: ["COMPLETE", "PARTIAL", "UNKNOWN"].includes(metricsStatus)
+      ? (metricsStatus as PositionKolSummary["metricsStatus"])
+      : "UNKNOWN",
+    updatedAt: text(value.updatedAt) || undefined,
+  };
+}
+
+export function normalizePositionKols(value: unknown): PositionKolSummary[] {
+  return normalizeItems(value).flatMap((item) => {
+    const summary = normalizePositionKolSummary(item);
+    return summary ? [summary] : [];
+  });
+}
+
+function normalizeDetailPosition(
+  value: unknown,
+  summary: PositionKolSummary,
+): PositionSnapshot | null {
+  if (!isRecord(value)) return null;
+  const symbol = text(value.symbol);
+  const updatedAt = text(value.updatedAt);
+  if (!symbol || !updatedAt) return null;
+  const positionSide = text(value.positionSide);
+  const side = text(value.side);
+  const confidence = text(value.confidence);
+  const status = text(value.status);
+  return {
+    subscriptionId: summary.subscriptionId,
+    kolId: summary.kolId,
+    kolName: summary.kolName,
+    platform: summary.platform,
+    accountId: summary.accountId,
+    symbol,
+    positionSide: ["LONG", "SHORT", "UNKNOWN"].includes(positionSide)
+      ? (positionSide as PositionSnapshot["positionSide"])
+      : "UNKNOWN",
+    side: ["LONG", "SHORT", "FLAT", "UNKNOWN"].includes(side)
+      ? (side as PositionSnapshot["side"])
+      : "UNKNOWN",
+    quantity: text(value.quantity) || undefined,
+    entryPrice: text(value.entryPrice) || undefined,
+    currentPrice: text(value.currentPrice) || undefined,
+    notional: text(value.notional) || undefined,
+    leverage: text(value.leverage) || undefined,
+    positionMargin: text(value.positionMargin) || undefined,
+    estimatedPnl: text(value.estimatedPnl) || undefined,
+    confidence: ["HIGH", "MEDIUM", "LOW", "UNKNOWN"].includes(confidence)
+      ? (confidence as PositionSnapshot["confidence"])
+      : "UNKNOWN",
+    status: ["ACTIVE", "FLAT", "UNKNOWN", "STALE"].includes(status)
+      ? (status as PositionSnapshot["status"])
+      : "UNKNOWN",
+    asOfEventTime: text(value.asOfEventTime) || undefined,
+    priceUpdatedAt: text(value.priceUpdatedAt) || undefined,
+    staleSince: text(value.staleSince) || undefined,
+    updatedAt,
+  };
+}
+
+export function normalizePositionKolDetail(value: unknown): PositionKolDetail | null {
+  const source = isRecord(value) && isRecord(value.item) ? value.item : null;
+  if (!source) return null;
+  const summary = normalizePositionKolSummary(source.summary);
+  if (!summary) return null;
+  const positionValues = Array.isArray(source.positions) ? source.positions : [];
+  return {
+    summary,
+    positions: positionValues.flatMap((item) => {
+      const position = normalizeDetailPosition(item, summary);
+      return position ? [position] : [];
+    }),
+  };
+}
+
+function normalizePositionOperation(value: unknown): PositionOperation | null {
+  if (!isRecord(value)) return null;
+  const sourceRecordId = text(value.sourceRecordId);
+  const eventTime = text(value.eventTime);
+  const action = text(value.action);
+  const positionSide = text(value.positionSide);
+  if (!sourceRecordId || !eventTime) return null;
+  return {
+    sourceRecordId,
+    revision: text(value.revision),
+    action: ["OPEN", "ADD", "REDUCE", "CLOSE", "REVERSE", "CORRECTION"].includes(action)
+      ? (action as PositionOperation["action"])
+      : "CORRECTION",
+    effectiveAction: text(value.effectiveAction),
+    symbol: text(value.symbol),
+    positionSide: ["LONG", "SHORT", "UNKNOWN"].includes(positionSide)
+      ? (positionSide as PositionOperation["positionSide"])
+      : "UNKNOWN",
+    quantity: text(value.quantity) || undefined,
+    price: text(value.price) || undefined,
+    amount: text(value.amount) || undefined,
+    leverage: text(value.leverage) || undefined,
+    realizedPnl: text(value.realizedPnl) || undefined,
+    eventTime,
+  };
+}
+
+export function normalizePositionOperations(
+  value: unknown,
+  params: { limit?: number; offset?: number } = {},
+): PositionOperationPage {
+  const source = isRecord(value) ? value : {};
+  const items = normalizeItems(value).flatMap((item) => {
+    const operation = normalizePositionOperation(item);
+    return operation ? [operation] : [];
+  });
+  return {
+    items,
+    total: numberValue(source.total) ?? items.length,
+    limit: numberValue(source.limit) ?? params.limit ?? 50,
+    offset: numberValue(source.offset) ?? params.offset ?? 0,
+  };
+}
+
+export async function fetchPositionKols(): Promise<PositionKolSummary[]> {
+  return normalizePositionKols(await getJson("/api/position-kols"));
+}
+
+export async function fetchPositionKolDetail(
+  subscriptionId: number,
+): Promise<PositionKolDetail | null> {
+  return normalizePositionKolDetail(
+    await getJson(`/api/position-kols/${subscriptionId}`),
+  );
+}
+
+export async function fetchPositionOperations(
+  subscriptionId: number,
+  params: { limit?: number; offset?: number } = {},
+): Promise<PositionOperationPage> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.offset !== undefined) query.set("offset", String(params.offset));
+  const suffix = query.toString();
+  return normalizePositionOperations(
+    await getJson(
+      `/api/position-kols/${subscriptionId}/operations${suffix ? `?${suffix}` : ""}`,
+    ),
+    params,
+  );
 }
 
 export async function login(username: string, password: string): Promise<void> {

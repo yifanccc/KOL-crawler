@@ -7,7 +7,7 @@ import pytest
 
 from collector_agent.db import CollectorStore
 from collector_agent.models import ProviderTarget
-from collector_agent.trade_models import TradeCheckpoint
+from collector_agent.trade_models import TradeAccountSnapshot, TradeCheckpoint
 from tests.trade_samples import sample_record, trade_result, trade_target
 
 
@@ -42,6 +42,13 @@ def test_trade_baseline_exposes_current_position_snapshots(tmp_path) -> None:
             "positionSide": "LONG",
             "side": "LONG",
             "quantity": "0.10",
+            "entryPrice": "50000",
+            "currentPrice": None,
+            "notional": None,
+            "leverage": "10",
+            "positionMargin": None,
+            "estimatedPnl": None,
+            "priceUpdatedAt": None,
             "confidence": "HIGH",
             "status": "ACTIVE",
             "asOfEventTime": "2026-08-09T01:01:00+00:00",
@@ -49,6 +56,69 @@ def test_trade_baseline_exposes_current_position_snapshots(tmp_path) -> None:
             "updatedAt": "2026-08-09T02:00:00+00:00",
         }
     ]
+
+
+def test_trade_snapshot_values_positions_and_exposes_account_and_operations(tmp_path) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    result = trade_result(
+        [
+            sample_record("1", "OPEN", "LONG", "0.10", price="50000"),
+            sample_record("2", "ADD", "LONG", "0.05", price="53000"),
+            sample_record("3", "REDUCE", "LONG", "0.04", price="54000"),
+        ],
+        "3",
+    )
+    result = replace(
+        result,
+        account_snapshot=TradeAccountSnapshot(
+            margin_balance=Decimal("137889.65"),
+            observed_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
+        ),
+        mark_prices={"BTCUSDT": Decimal("52000")},
+    )
+
+    store.record_trade_fetch(7, trade_target(), result)
+
+    assert store.account_snapshot_for(7) == {
+        "marginBalance": "137889.65",
+        "updatedAt": "2026-08-09T02:05:00+00:00",
+    }
+    assert store.position_snapshots_for(7) == [
+        {
+            "symbol": "BTCUSDT",
+            "positionSide": "LONG",
+            "side": "LONG",
+            "quantity": "0.11",
+            "entryPrice": "51000",
+            "currentPrice": "52000",
+            "notional": "5720.00",
+            "leverage": "10",
+            "positionMargin": "572.00",
+            "estimatedPnl": "110.00",
+            "priceUpdatedAt": "2026-08-09T02:05:00+00:00",
+            "confidence": "HIGH",
+            "status": "ACTIVE",
+            "asOfEventTime": "2026-08-09T01:03:00+00:00",
+            "staleSince": None,
+            "updatedAt": "2026-08-09T02:00:00+00:00",
+        }
+    ]
+    operations = store.trade_operation_snapshots_for(7)
+    assert [item["action"] for item in operations] == ["OPEN", "ADD", "REDUCE"]
+    assert operations[-1] == {
+        "sourceRecordId": "3",
+        "revision": "r1",
+        "action": "REDUCE",
+        "effectiveAction": "REDUCE",
+        "symbol": "BTCUSDT",
+        "positionSide": "LONG",
+        "quantity": "0.04",
+        "price": "54000",
+        "amount": "2160.00",
+        "leverage": "10",
+        "realizedPnl": None,
+        "eventTime": "2026-08-09T01:03:00+00:00",
+    }
 
 
 def test_second_trade_fetch_is_atomic_idempotent_and_survives_restart(tmp_path) -> None:

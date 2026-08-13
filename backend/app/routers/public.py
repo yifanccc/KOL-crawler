@@ -1,15 +1,27 @@
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import KolProfile, PositionEstimate, Subscription
+from app.models import (
+    KolProfile,
+    PositionAccountSnapshot,
+    PositionEstimate,
+    PositionOperation,
+    Subscription,
+)
+from app.models.subscription import TRADE_PLATFORMS
 from app.routers.auth import require_authenticated
 from app.services.collector_health import collector_health_payload
 from app.services.signal_feed import signal_detail, signal_page, visible_public_assets
+from app.services.position_monitor import (
+    operation_payload,
+    position_payload,
+    position_summary_payload,
+)
 
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_authenticated)])
@@ -131,6 +143,132 @@ def list_positions(db: Session = Depends(get_db)) -> dict:
             }
             for position, subscription, kol in rows
         ]
+    }
+
+
+def _trade_subscription(
+    db: Session,
+    subscription_id: int,
+) -> tuple[Subscription, KolProfile]:
+    row = db.execute(
+        select(Subscription, KolProfile)
+        .join(KolProfile, KolProfile.id == Subscription.kol_profile_id)
+        .where(
+            Subscription.id == subscription_id,
+            Subscription.deleted_at.is_(None),
+            Subscription.visibility == "private",
+            Subscription.platform.in_(TRADE_PLATFORMS),
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Position KOL not found")
+    return row
+
+
+def _position_summary(
+    db: Session,
+    subscription: Subscription,
+    kol: KolProfile,
+) -> tuple[dict, list[PositionEstimate]]:
+    positions = list(
+        db.scalars(
+            select(PositionEstimate)
+            .where(PositionEstimate.subscription_id == subscription.id)
+            .order_by(PositionEstimate.symbol, PositionEstimate.position_side)
+        ).all()
+    )
+    account = db.get(PositionAccountSnapshot, subscription.id)
+    return position_summary_payload(subscription, kol, account, positions), positions
+
+
+@router.get("/position-kols")
+def list_position_kols(db: Session = Depends(get_db)) -> dict:
+    rows = db.execute(
+        select(Subscription, KolProfile)
+        .join(KolProfile, KolProfile.id == Subscription.kol_profile_id)
+        .where(
+            Subscription.deleted_at.is_(None),
+            Subscription.visibility == "private",
+            Subscription.platform.in_(TRADE_PLATFORMS),
+        )
+        .order_by(KolProfile.display_name, Subscription.id)
+    ).all()
+    subscription_ids = [subscription.id for subscription, _ in rows]
+    positions_by_subscription: dict[int, list[PositionEstimate]] = {
+        subscription_id: [] for subscription_id in subscription_ids
+    }
+    accounts_by_subscription: dict[int, PositionAccountSnapshot] = {}
+    if subscription_ids:
+        for position in db.scalars(
+            select(PositionEstimate).where(
+                PositionEstimate.subscription_id.in_(subscription_ids)
+            )
+        ).all():
+            positions_by_subscription[position.subscription_id].append(position)
+        accounts_by_subscription = {
+            account.subscription_id: account
+            for account in db.scalars(
+                select(PositionAccountSnapshot).where(
+                    PositionAccountSnapshot.subscription_id.in_(subscription_ids)
+                )
+            ).all()
+        }
+    return {
+        "items": [
+            position_summary_payload(
+                subscription,
+                kol,
+                accounts_by_subscription.get(subscription.id),
+                positions_by_subscription[subscription.id],
+            )
+            for subscription, kol in rows
+        ]
+    }
+
+
+@router.get("/position-kols/{subscription_id}")
+def get_position_kol(
+    subscription_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    subscription, kol = _trade_subscription(db, subscription_id)
+    summary, positions = _position_summary(db, subscription, kol)
+    return {
+        "item": {
+            "summary": summary,
+            "positions": [
+                position_payload(position)
+                for position in positions
+                if position.status != "FLAT"
+            ],
+        }
+    }
+
+
+@router.get("/position-kols/{subscription_id}/operations")
+def list_position_operations(
+    subscription_id: int,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> dict:
+    _trade_subscription(db, subscription_id)
+    predicate = PositionOperation.subscription_id == subscription_id
+    total = db.scalar(
+        select(func.count()).select_from(PositionOperation).where(predicate)
+    ) or 0
+    rows = db.scalars(
+        select(PositionOperation)
+        .where(predicate)
+        .order_by(desc(PositionOperation.event_time), desc(PositionOperation.id))
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return {
+        "items": [operation_payload(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
