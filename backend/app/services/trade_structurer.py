@@ -53,10 +53,21 @@ class PositionAfter(BaseModel):
         return _decimal_string(value)
 
 
+class PositionChange(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    symbol: str = Field(min_length=2, max_length=64, pattern=r"^[A-Z0-9._-]+$")
+    position_side: Literal["LONG", "SHORT", "UNKNOWN"] = Field(
+        alias="positionSide"
+    )
+    before: PositionAfter
+    after: PositionAfter
+
+
 class TradePayload(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    schema_version: Literal[1] = Field(alias="schemaVersion")
+    schema_version: Literal[1, 2] = Field(alias="schemaVersion")
     platform: Literal["binance_copy"]
     account_id: str = Field(
         alias="accountId", min_length=8, max_length=32, pattern=r"^[0-9]+$"
@@ -75,6 +86,19 @@ class TradePayload(BaseModel):
     event_time: datetime = Field(alias="eventTime")
     position_after: PositionAfter = Field(alias="positionAfter")
     source_record: dict[str, Any] = Field(default_factory=dict, alias="sourceRecord")
+    collection_batch_id: str | None = Field(
+        default=None,
+        alias="collectionBatchId",
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    collection_batch_size: int | None = Field(
+        default=None, alias="collectionBatchSize", ge=1, le=10000
+    )
+    position_changes: list[PositionChange] | None = Field(
+        default=None, alias="positionChanges", max_length=1000
+    )
 
     @field_validator("quantity", "price", "leverage", mode="before")
     @classmethod
@@ -101,6 +125,22 @@ class TradePayload(BaseModel):
             self.action
         ]:
             raise ValueError("action does not match effectiveAction")
+        batch_values = (
+            self.collection_batch_id,
+            self.collection_batch_size,
+            self.position_changes,
+        )
+        if self.schema_version == 2 and any(value is None for value in batch_values):
+            raise ValueError("schemaVersion 2 requires complete batch metadata")
+        if self.schema_version == 1 and any(value is not None for value in batch_values):
+            raise ValueError("schemaVersion 1 cannot include batch metadata")
+        if self.position_changes is not None:
+            keys = [
+                (change.symbol, change.position_side)
+                for change in self.position_changes
+            ]
+            if len(keys) != len(set(keys)):
+                raise ValueError("positionChanges contains duplicate position keys")
         return self
 
 

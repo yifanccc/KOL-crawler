@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from dataclasses import replace
@@ -86,6 +87,91 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 def _decimal_text(value: Decimal | None) -> str | None:
     return format(value, "f") if value is not None else None
+
+
+def _position_from_row(row: sqlite3.Row) -> PositionEstimate:
+    return PositionEstimate(
+        symbol=row["symbol"],
+        position_side=row["position_side"],
+        side=row["side"],
+        quantity=Decimal(row["quantity"]) if row["quantity"] is not None else None,
+        entry_price=(
+            Decimal(row["entry_price"]) if row["entry_price"] is not None else None
+        ),
+        leverage=Decimal(row["leverage"]) if row["leverage"] is not None else None,
+        confidence=row["confidence"],
+        status=row["status"],
+        as_of_event_time=_parse_datetime(row["as_of_event_time"]),
+    )
+
+
+def _missing_position(symbol: str, position_side: TradePositionSide) -> PositionEstimate:
+    return PositionEstimate(
+        symbol=symbol,
+        position_side=position_side,
+        side="FLAT",
+        quantity=Decimal("0"),
+        confidence="HIGH",
+        status="FLAT",
+        as_of_event_time=None,
+    )
+
+
+def _position_signature(position: PositionEstimate) -> tuple:
+    return (
+        position.side,
+        position.quantity,
+        position.entry_price,
+        position.leverage,
+    )
+
+
+def _position_state_payload(position: PositionEstimate) -> dict:
+    return {
+        "side": position.side,
+        "quantity": _decimal_text(position.quantity),
+        "entryPrice": _decimal_text(position.entry_price),
+        "leverage": _decimal_text(position.leverage),
+        "confidence": position.confidence,
+        "status": position.status,
+    }
+
+
+def _position_changes(
+    before: dict[tuple[str, TradePositionSide], PositionEstimate],
+    after: dict[tuple[str, TradePositionSide], PositionEstimate],
+) -> list[dict]:
+    changes = []
+    for symbol, position_side in sorted(set(before) | set(after)):
+        previous = before.get((symbol, position_side)) or _missing_position(
+            symbol, position_side
+        )
+        current = after.get((symbol, position_side)) or _missing_position(
+            symbol, position_side
+        )
+        if _position_signature(previous) == _position_signature(current):
+            continue
+        changes.append(
+            {
+                "symbol": symbol,
+                "positionSide": position_side,
+                "before": _position_state_payload(previous),
+                "after": _position_state_payload(current),
+            }
+        )
+    return changes
+
+
+def _batch_id(target: ProviderTarget, events) -> str:
+    identity = {
+        "platform": target.platform,
+        "accountId": target.account_id,
+        "records": [
+            [event.record.source_record_id, event.record.revision] for event in events
+        ],
+    }
+    encoded = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def _canonical_record(record: NormalizedTradeRecord) -> str:
@@ -262,6 +348,16 @@ def record_trade_fetch(
         if rows:
             records = [_record_from_row(row) for row in rows]
             reconciliation = reconcile_records(records, result.history_complete)
+            previous_rows = connection.execute(
+                "SELECT symbol, position_side, side, quantity, entry_price, leverage, "
+                "mark_price, price_updated_at, confidence, status, as_of_event_time "
+                "FROM position_estimates WHERE subscription_id = ?",
+                (subscription_id,),
+            ).fetchall()
+            previous_positions = {
+                (row["symbol"], row["position_side"]): _position_from_row(row)
+                for row in previous_rows
+            }
             previous_prices = {
                 (row["symbol"], row["position_side"]): (
                     Decimal(row["mark_price"])
@@ -269,11 +365,7 @@ def record_trade_fetch(
                     else None,
                     _parse_datetime(row["price_updated_at"]),
                 )
-                for row in connection.execute(
-                    "SELECT symbol, position_side, mark_price, price_updated_at "
-                    "FROM position_estimates WHERE subscription_id = ?",
-                    (subscription_id,),
-                ).fetchall()
+                for row in previous_rows
             }
             connection.execute(
                 "DELETE FROM position_estimates WHERE subscription_id = ?",
@@ -351,11 +443,25 @@ def record_trade_fetch(
                 )
 
             if not baseline:
-                for event in reconciliation.events:
-                    key = (event.record.source_record_id, event.record.revision)
-                    if key not in inserted_keys:
-                        continue
-                    post = build_collected_post(target, event)
+                new_events = [
+                    event
+                    for event in reconciliation.events
+                    if (event.record.source_record_id, event.record.revision)
+                    in inserted_keys
+                ]
+                batch_size = len(new_events)
+                batch_id = _batch_id(target, new_events) if new_events else None
+                position_changes = _position_changes(
+                    previous_positions, reconciliation.positions
+                )
+                for event in new_events:
+                    post = build_collected_post(
+                        target,
+                        event,
+                        batch_id=batch_id,
+                        batch_size=batch_size,
+                        position_changes=position_changes,
+                    )
                     cursor = connection.execute(
                         "INSERT OR IGNORE INTO outbox_posts "
                         "(subscription_id, external_id, payload_json) VALUES (?, ?, ?)",

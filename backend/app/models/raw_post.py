@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -8,7 +8,14 @@ from app.db.base import Base
 
 class RawPost(Base):
     __tablename__ = "raw_posts"
-    __table_args__ = (UniqueConstraint("platform", "external_id", name="uq_raw_posts_platform_external"),)
+    __table_args__ = (
+        UniqueConstraint("platform", "external_id", name="uq_raw_posts_platform_external"),
+        Index(
+            "ix_raw_posts_subscription_notification_batch",
+            "subscription_id",
+            "notification_batch_id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -21,6 +28,8 @@ class RawPost(Base):
     raw_json: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(String(64))
     subscription_id: Mapped[int | None] = mapped_column(ForeignKey("subscriptions.id"))
+    notification_batch_id: Mapped[str | None] = mapped_column(String(64))
+    notification_batch_size: Mapped[int | None] = mapped_column(Integer)
     analysis_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="pending", server_default="pending"
     )

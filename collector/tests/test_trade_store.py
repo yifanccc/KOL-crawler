@@ -169,10 +169,78 @@ def test_trade_outbox_preserves_event_time_order(tmp_path) -> None:
         ),
     )
 
-    assert [post.external_id for post in store.pending_posts()] == [
+    pending = store.pending_posts()
+    assert [post.external_id for post in pending] == [
         "5075281354358777856:2:r1",
         "5075281354358777856:10:r1",
     ]
+    assert len({post.payload["batchId"] for post in pending}) == 1
+    assert [post.payload["batchSize"] for post in pending] == [2, 2]
+    assert [post.payload["rawPayload"]["schemaVersion"] for post in pending] == [2, 2]
+    assert pending[0].payload["rawPayload"]["positionChanges"] == [
+        {
+            "symbol": "BTCUSDT",
+            "positionSide": "LONG",
+            "before": {
+                "side": "LONG",
+                "quantity": "0.10",
+                "entryPrice": "50000",
+                "leverage": "10",
+                "confidence": "HIGH",
+                "status": "ACTIVE",
+            },
+            "after": {
+                "side": "LONG",
+                "quantity": "0.12",
+                "entryPrice": "50000",
+                "leverage": "10",
+                "confidence": "HIGH",
+                "status": "ACTIVE",
+            },
+        }
+    ]
+
+
+def test_price_refresh_does_not_create_trade_notification_outbox(tmp_path) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    baseline = replace(
+        trade_result([sample_record("1", "OPEN", "LONG", "0.10")], "1"),
+        mark_prices={"BTCUSDT": Decimal("50000")},
+    )
+    store.record_trade_fetch(7, trade_target(), baseline)
+
+    refreshed = replace(baseline, mark_prices={"BTCUSDT": Decimal("51000")})
+    assert store.record_trade_fetch(7, trade_target(), refreshed) == 0
+    assert store.pending_posts() == []
+    position = store.position_for(7, "BTCUSDT", "LONG")
+    assert position is not None
+    assert position.mark_price == Decimal("51000")
+
+
+def test_trade_revision_without_position_change_marks_batch_as_non_notifiable(
+    tmp_path,
+) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    original = sample_record("1", "OPEN", "LONG", "0.10")
+    store.record_trade_fetch(7, trade_target(), trade_result([original], "1"))
+    revision = sample_record(
+        "1",
+        "OPEN",
+        "LONG",
+        "0.10",
+        revision="r2",
+        observed_minute=2,
+    )
+
+    assert store.record_trade_fetch(
+        7,
+        trade_target(),
+        trade_result([original, revision], "1"),
+    ) == 1
+    pending = store.pending_posts()
+    assert len(pending) == 1
+    assert pending[0].payload["rawPayload"]["action"] == "CORRECTION"
+    assert pending[0].payload["rawPayload"]["positionChanges"] == []
 
 
 def test_trade_fetch_rolls_back_ledger_position_outbox_and_checkpoint_together(

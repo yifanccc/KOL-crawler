@@ -30,6 +30,8 @@ MIGRATION_COLUMNS = {
     },
     "raw_posts": {
         "subscription_id": "BIGINT NULL",
+        "notification_batch_id": "VARCHAR(64) NULL",
+        "notification_batch_size": "INT NULL",
         "analysis_status": "VARCHAR(32) NOT NULL DEFAULT 'pending'",
         "analysis_error": "LONGTEXT NULL",
         "analysis_attempts": "INT NOT NULL DEFAULT 0",
@@ -240,6 +242,17 @@ def run_schema_migrations(engine: Engine) -> None:
                     "WHERE signals.raw_post_id = raw_posts.id)"
                 )
             )
+        if "raw_posts" in existing_tables:
+            raw_post_indexes = {
+                item["name"] for item in inspect(connection).get_indexes("raw_posts")
+            }
+            if "ix_raw_posts_subscription_notification_batch" not in raw_post_indexes:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_raw_posts_subscription_notification_batch "
+                        "ON raw_posts (subscription_id, notification_batch_id)"
+                    )
+                )
         if engine.dialect.name == "mysql" and "notification_events" in existing_tables:
             names = {item["name"] for item in inspector.get_unique_constraints("notification_events")}
             if "uq_notification_event_signal_rule" not in names:

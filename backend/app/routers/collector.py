@@ -58,6 +58,29 @@ class UploadedPost(BaseModel):
     rawContent: str = Field(min_length=1, max_length=50000)
     rawPayload: dict[str, Any] | None = None
     contentHash: str | None = Field(default=None, max_length=64)
+    batchId: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+    batchSize: int | None = Field(default=None, ge=1, le=10000)
+
+    @model_validator(mode="after")
+    def validate_batch(self) -> "UploadedPost":
+        if (self.batchId is None) != (self.batchSize is None):
+            raise ValueError("batchId and batchSize must be provided together")
+        payload_batch_id = (
+            self.rawPayload.get("collectionBatchId") if self.rawPayload else None
+        )
+        payload_batch_size = (
+            self.rawPayload.get("collectionBatchSize") if self.rawPayload else None
+        )
+        if payload_batch_id is not None or payload_batch_size is not None:
+            if (
+                self.platform != "binance_copy"
+                or self.batchId != payload_batch_id
+                or self.batchSize != payload_batch_size
+            ):
+                raise ValueError("post batch metadata does not match rawPayload")
+        return self
 
 
 class UploadedPosition(BaseModel):
@@ -278,7 +301,10 @@ def collector_posts(
                     url=post.url, author_handle=post.authorHandle, author_name=post.authorName,
                     published_at=post.publishedAt, raw_text=post.rawContent,
                     raw_json=json.dumps(post.rawPayload, ensure_ascii=False) if post.rawPayload else None,
-                    content_hash=post.contentHash, analysis_status="pending",
+                    content_hash=post.contentHash,
+                    notification_batch_id=post.batchId,
+                    notification_batch_size=post.batchSize,
+                    analysis_status="pending",
                 ))
                 db.flush()
                 avatar_url = (post.authorAvatarUrl or "").strip()

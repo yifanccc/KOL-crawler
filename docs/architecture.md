@@ -20,9 +20,9 @@ OpenCLI / Binance Square / Binance Copy order history
 
 ## Binance Copy 交易链路
 
-`binance_copy` 订阅以固定 `portfolioId` 标识账号，当前实现仅支持 Binance，不注册 OKX provider。交易订阅固定为 10 分钟和 `private`；首轮抓取只把最近记录写入本机 ledger、建立低置信度基线，不产生 Outbox 或通知。后续新记录按 `accountId:sourceRecordId:revision` 形成稳定外部 ID，经历史账本推导 `OPEN/ADD/REDUCE/CLOSE` 和 `positionAfter`。交易订阅的默认通知阈值为“低”，确保当前 `history_complete=false` 的新增事件在配置 ntfy 后仍可通知；普通订阅继续默认“中”。
+`binance_copy` 订阅以固定 `portfolioId` 标识账号，当前实现仅支持 Binance，不注册 OKX provider。交易订阅固定为 10 分钟和 `private`；首轮抓取只把最近记录写入本机 ledger、建立低置信度基线，不产生 Outbox 或通知。后续新记录按 `accountId:sourceRecordId:revision` 形成稳定外部 ID，经历史账本推导 `OPEN/ADD/REDUCE/CLOSE` 和 `positionAfter`。同一次订阅采集中的新成交共享 `collectionBatchId`，并携带批次总笔数和按品种、方向计算的仓位前后差异。交易订阅的默认通知阈值为“低”，确保当前 `history_complete=false` 的新增事件在配置 ntfy 后仍可通知；普通订阅继续默认“中”。
 
-交易事件上传后复用 `RawPost`、Signal、asset/tag 和通知表，但由 deterministic trade structurer 严格校验 payload，绝不调用 LLM。常规 `/api/signals`、Signal 详情、KOL、资产和统计查询排除 private 订阅；只有需管理员登录的 `/api/admin/signals` 可以读取。管理页复用常规卡片、筛选、分页和 60 秒非阻断刷新。这里的 `private` 是应用内可见性边界，不表示 Binance 当前首屏 BAPI 强制登录。
+交易事件上传后仍逐笔复用 `RawPost`、Signal、asset/tag，以保留完整操作记录，但通知会等待同批所有 Signal 就绪后再合并。只有方向、数量、推测开仓均价或杠杆发生变化且 `positionChanges` 非空时才发送一条 ntfy；现价、预计盈亏或账户保证金的单独刷新不触发。常规 `/api/signals`、Signal 详情、KOL、资产和统计查询排除 private 订阅；只有需管理员登录的 `/api/admin/signals` 可以读取。管理页复用常规卡片、筛选、分页和 60 秒非阻断刷新。这里的 `private` 是应用内可见性边界，不表示 Binance 当前首屏 BAPI 强制登录。
 
 ## 安全边界
 

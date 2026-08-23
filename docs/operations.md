@@ -131,11 +131,11 @@ Dashboard 的 Collector 状态来自最近一次 heartbeat；心跳陈旧时先�
 
 ## 通知排查
 
-信号通知以 `(signal_id, notification_rule_id)` 唯一，重试不会再次 publish。真实 ntfy topic/token 只放在 `.env`；用部署方明确授权的测试规则发送一条通知并记录 HTTP 状态，日志中不得输出 token。provider 健康通知由本机 Collector 发送，与公网信号通知相互独立。
+普通信号通知以 `(signal_id, notification_rule_id)` 唯一，重试不会再次 publish。Binance Copy 的批量通知使用该批第一条 Signal 作为唯一锚点，同批后续 Signal 不会重复 publish。真实 ntfy topic/token 只放在 `.env`；用部署方明确授权的测试规则发送一条通知并记录 HTTP 状态，日志中不得输出 token。provider 健康通知由本机 Collector 发送，与公网信号通知相互独立。
 
 信号标题固定为 `平台 | KOL昵称 | 原帖北京时间`，例如 `X | Serenity | 2026-07-13 08:45`。昵称只读取原帖 `author_name`，绝不使用账号 handle；昵称缺失时显示 `未知 KOL`。原帖时间转换为 `Asia/Shanghai` 并显示到分钟，缺失时显示 `时间未知`。
 
-信号推送正文严格只有三行：
+普通内容信号推送正文严格只有三行：
 
 ```text
 摘要：<中文摘要>
@@ -144,3 +144,5 @@ Dashboard 的 Collector 状态来自最近一次 heartbeat；心跳陈旧时先�
 ```
 
 中文标题和正文使用 ntfy JSON 发布，避免把非 ASCII 文本放入 HTTP Header。
+
+Binance Copy 交易通知按“单次订阅采集”聚合：后端先等待 `collectionBatchSize` 笔交易全部生成 Signal，再发送一条 `Binance Copy | <KOL> | 仓位变动 <N> 笔`。正文按品种和持仓方向展示仓位前后值、变化量、推测开仓均价、成交笔数/数量/均价/金额汇总、该品种当前仓位和 KOL 当前核心汇总。`positionChanges` 为空时不创建通知事件；仅 mark price、预计盈亏或保证金余额刷新时 Collector 不创建交易 Outbox，因此也不会推送。若后端当前仓位与批次最终状态不一致，通知会省略可能过期的现价、盈亏和 KOL 汇总，并明确提示快照尚未同步。

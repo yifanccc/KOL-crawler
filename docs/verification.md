@@ -213,6 +213,15 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 
 本验收只证明代码、合成数据和已验证只读响应契约在本机可用，不代表已部署到生产。当前 Binance 首屏请求不发送或保存 Cookie/Authorization；应用仍将生成的数据强制标为 `private`。
 
+### Binance Copy 仓位变动批量通知本地验收
+
+2026-08-23 将 Binance Copy 的 ntfy 粒度从“每笔成交一条”改为“每次订阅采集一条”。逐笔 RawPost、Signal 和操作记录继续保留；Collector 为同批新成交生成稳定 batch ID、批次总数和按品种/方向计算的仓位前后差异。后端等待该批全部 Signal 就绪后，以第一条 Signal 作为唯一通知锚点，只在方向、数量、推测开仓均价或杠杆确有变化时发送。mark price、预计盈亏和账户保证金的单独刷新不产生交易 Outbox。
+
+- 隔离 API 容器后端全量 `96 passed`，仅 1 条既有 Starlette/httpx 弃用警告；测试覆盖两笔成交等待并合成一条通知、仓位 `0.10 → 0.18`、成交数量/均价/金额汇总、重复调度幂等，以及空 `positionChanges` 零推送。
+- Collector 全量 `57 passed`；测试覆盖同批两笔事件共享 batch ID/size、聚合前后仓位、无仓位变化的交易修订，以及仅 mark price 从 50,000 更新到 51,000 时 Outbox 仍为 0。
+- 本地 API 已重新构建并重启，`GET /health` 为 200；MySQL 已存在 `notification_batch_id`、`notification_batch_size` 和组合索引。launchd Collector 已于北京时间 20:19 重启并加载当前分支代码，本地待上传 Outbox 和死信均为 0。
+- 本轮没有伪造真实成交，也没有向用户的真实 ntfy topic 发送测试通知；首次真实汇总推送需等待 Binance 后续出现实际仓位变动。
+
 ## 外部前置条件
 
 - ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。

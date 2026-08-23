@@ -257,7 +257,14 @@ def _ensure_json_safe(value: Any) -> None:
     raise ValueError("sourceRecord must contain JSON-safe values")
 
 
-def build_collected_post(target: ProviderTarget, event: TradeEvent) -> CollectedPost:
+def build_collected_post(
+    target: ProviderTarget,
+    event: TradeEvent,
+    *,
+    batch_id: str | None = None,
+    batch_size: int | None = None,
+    position_changes: list[dict[str, Any]] | None = None,
+) -> CollectedPost:
     record = event.record
     if target.platform != record.platform or target.account_id != record.account_id:
         raise ValueError("trade target does not match normalized record")
@@ -265,7 +272,7 @@ def build_collected_post(target: ProviderTarget, event: TradeEvent) -> Collected
 
     position = event.position_after
     raw_payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2 if batch_id is not None else 1,
         "platform": record.platform,
         "accountId": record.account_id,
         "sourceRecordId": record.source_record_id,
@@ -288,6 +295,17 @@ def build_collected_post(target: ProviderTarget, event: TradeEvent) -> Collected
         },
         "sourceRecord": record.source_payload,
     }
+    if batch_id is not None:
+        if batch_size is None or batch_size <= 0 or position_changes is None:
+            raise ValueError("trade batch metadata is incomplete")
+        _ensure_json_safe(position_changes)
+        raw_payload.update(
+            {
+                "collectionBatchId": batch_id,
+                "collectionBatchSize": batch_size,
+                "positionChanges": position_changes,
+            }
+        )
     canonical_payload = json.dumps(
         raw_payload,
         ensure_ascii=False,

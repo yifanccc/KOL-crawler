@@ -21,6 +21,8 @@ from app.db.migrations import run_schema_migrations
 
 RAW_POST_ANALYSIS_COLUMNS = {
     "subscription_id",
+    "notification_batch_id",
+    "notification_batch_size",
     "analysis_status",
     "analysis_error",
     "analysis_attempts",
@@ -58,6 +60,12 @@ def test_migrations_are_idempotent_for_fresh_schema() -> None:
     assert any(
         set(constraint["column_names"] or []) == {"platform", "external_id"}
         for constraint in unique_constraints
+    )
+    indexes = inspect(engine).get_indexes("raw_posts")
+    assert any(
+        index["name"] == "ix_raw_posts_subscription_notification_batch"
+        and index["column_names"] == ["subscription_id", "notification_batch_id"]
+        for index in indexes
     )
 
 

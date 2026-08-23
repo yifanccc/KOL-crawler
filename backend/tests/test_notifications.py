@@ -313,3 +313,217 @@ def test_repeated_dispatch_creates_one_event_and_one_publish_call() -> None:
         assert len(client.calls) == 1
     finally:
         session.close()
+
+
+def test_binance_copy_batch_waits_then_sends_one_aggregated_position_change() -> None:
+    reset_database()
+    session = SessionLocal()
+    try:
+        kol = KolProfile(platform="binance_copy", display_name="熬鹰资本")
+        session.add(kol)
+        session.flush()
+        subscription = Subscription(
+            kol_profile_id=kol.id,
+            platform="binance_copy",
+            platform_account_id="5075281354358777856",
+            platform_handle="熬鹰资本",
+            visibility="private",
+            interval_minutes=10,
+        )
+        session.add(subscription)
+        session.flush()
+        session.add_all(
+            [
+                PositionAccountSnapshot(
+                    subscription_id=subscription.id,
+                    margin_balance="10000",
+                    source_updated_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
+                ),
+                PositionEstimate(
+                    subscription_id=subscription.id,
+                    symbol="BTCUSDT",
+                    position_side="LONG",
+                    side="LONG",
+                    quantity="0.18",
+                    entry_price="51222.22222222",
+                    mark_price="53000",
+                    notional="9540",
+                    leverage="10",
+                    position_margin="954",
+                    estimated_pnl="320",
+                    confidence="HIGH",
+                    status="ACTIVE",
+                    source_updated_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
+                ),
+            ]
+        )
+        rule = NotificationRule(
+            subscription_id=subscription.id,
+            ntfy_server="https://ntfy.sh",
+            ntfy_topic="kol-test",
+            min_confidence="中",
+            require_asset=True,
+            enabled=True,
+        )
+        session.add(rule)
+        asset = Asset(symbol="BTCUSDT", market="CRYPTO", asset_type="crypto")
+        session.add(asset)
+        session.flush()
+
+        batch_id = "a" * 64
+        position_changes = [
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "LONG",
+                "before": {
+                    "side": "LONG",
+                    "quantity": "0.10",
+                    "entryPrice": "50000",
+                    "leverage": "10",
+                    "confidence": "HIGH",
+                    "status": "ACTIVE",
+                },
+                "after": {
+                    "side": "LONG",
+                    "quantity": "0.18",
+                    "entryPrice": "51222.22222222",
+                    "leverage": "10",
+                    "confidence": "HIGH",
+                    "status": "ACTIVE",
+                },
+            }
+        ]
+
+        def add_batch_post(record_id: str, quantity: str, price: str, minute: int):
+            payload = {
+                "schemaVersion": 2,
+                "platform": "binance_copy",
+                "accountId": "5075281354358777856",
+                "sourceRecordId": record_id,
+                "revision": "r1",
+                "action": "ADD",
+                "effectiveAction": "INCREASE",
+                "symbol": "BTCUSDT",
+                "positionSide": "LONG",
+                "quantity": quantity,
+                "price": price,
+                "leverage": "10",
+                "eventTime": f"2026-08-09T01:0{minute}:00Z",
+                "positionAfter": {
+                    "side": "LONG",
+                    "quantity": "0.18",
+                    "entryPrice": "51222.22222222",
+                    "leverage": "10",
+                    "confidence": "HIGH",
+                    "status": "ACTIVE",
+                },
+                "sourceRecord": {"id": record_id},
+                "collectionBatchId": batch_id,
+                "collectionBatchSize": 2,
+                "positionChanges": position_changes,
+            }
+            raw_post = RawPost(
+                subscription_id=subscription.id,
+                platform="binance_copy",
+                external_id=f"5075281354358777856:{record_id}:r1",
+                author_name="熬鹰资本",
+                published_at=datetime(2026, 8, 9, 1, minute, tzinfo=UTC),
+                raw_text="BTCUSDT 加仓",
+                raw_json=__import__("json").dumps(payload),
+                notification_batch_id=batch_id,
+                notification_batch_size=2,
+            )
+            session.add(raw_post)
+            session.flush()
+            return raw_post
+
+        first_post = add_batch_post("2", "0.05", "52000", 2)
+        second_post = add_batch_post("3", "0.03", "54000", 3)
+        first_signal = Signal(
+            subscription_id=subscription.id,
+            raw_post_id=first_post.id,
+            actionable=True,
+            stance="bullish",
+            stance_cn="多",
+            summary="BTCUSDT 加仓",
+            symbols_json='["BTCUSDT"]',
+            confidence="高",
+            structured_status="deterministic",
+        )
+        session.add(first_signal)
+        session.flush()
+        session.add(SignalAsset(signal_id=first_signal.id, asset_id=asset.id))
+        session.flush()
+
+        client = FakeNtfyClient()
+        assert dispatch_notifications(session, first_signal, client) == 0
+
+        second_signal = Signal(
+            subscription_id=subscription.id,
+            raw_post_id=second_post.id,
+            actionable=True,
+            stance="bullish",
+            stance_cn="多",
+            summary="BTCUSDT 加仓",
+            symbols_json='["BTCUSDT"]',
+            confidence="高",
+            structured_status="deterministic",
+        )
+        session.add(second_signal)
+        session.flush()
+        session.add(SignalAsset(signal_id=second_signal.id, asset_id=asset.id))
+        session.flush()
+
+        assert dispatch_notifications(session, second_signal, client) == 1
+        assert dispatch_notifications(session, second_signal, client) == 0
+        assert len(client.calls) == 1
+        assert len(session.scalars(select(NotificationEvent)).all()) == 1
+        title = client.calls[0][2]
+        message = client.calls[0][3]
+        assert title == "Binance Copy | 熬鹰资本 | 仓位变动 2 笔"
+        assert "共 2 笔成交" in message
+        assert "仓位：多 0.1 → 多 0.18（+0.08）" in message
+        assert "操作汇总：加仓 2 笔" in message
+        assert "成交数量合计 0.08" in message
+        assert "成交均价 52,750.00" in message
+        assert "成交额合计 4,220.00 USDT" in message
+
+        no_change_payload = {
+            **__import__("json").loads(first_post.raw_json),
+            "sourceRecordId": "4",
+            "collectionBatchId": "b" * 64,
+            "collectionBatchSize": 1,
+            "positionChanges": [],
+        }
+        no_change_post = RawPost(
+            subscription_id=subscription.id,
+            platform="binance_copy",
+            external_id="5075281354358777856:4:r1",
+            author_name="熬鹰资本",
+            raw_text="BTCUSDT 交易修订",
+            raw_json=__import__("json").dumps(no_change_payload),
+            notification_batch_id="b" * 64,
+            notification_batch_size=1,
+        )
+        session.add(no_change_post)
+        session.flush()
+        no_change_signal = Signal(
+            subscription_id=subscription.id,
+            raw_post_id=no_change_post.id,
+            actionable=True,
+            stance="neutral",
+            stance_cn="中性",
+            summary="BTCUSDT 交易修订",
+            symbols_json='["BTCUSDT"]',
+            confidence="高",
+            structured_status="deterministic",
+        )
+        session.add(no_change_signal)
+        session.flush()
+        session.add(SignalAsset(signal_id=no_change_signal.id, asset_id=asset.id))
+        session.flush()
+
+        assert dispatch_notifications(session, no_change_signal, client) == 0
+        assert len(client.calls) == 1
+    finally:
+        session.close()

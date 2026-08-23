@@ -44,6 +44,7 @@ class PostFetchResult:
 
 
 def collected_post_payload(subscription_id: int, post: CollectedPost) -> dict[str, Any]:
+    raw_payload = post.raw_payload or {}
     return {
         "subscriptionId": subscription_id,
         "platform": post.platform,
@@ -56,4 +57,6 @@ def collected_post_payload(subscription_id: int, post: CollectedPost) -> dict[st
         "rawContent": post.raw_content,
         "rawPayload": post.raw_payload,
         "contentHash": post.content_hash,
+        "batchId": raw_payload.get("collectionBatchId"),
+        "batchSize": raw_payload.get("collectionBatchSize"),
     }

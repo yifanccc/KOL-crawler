@@ -147,8 +147,9 @@ def test_binance_trade_upload_is_deterministic_and_private(monkeypatch) -> None:
             )
         )
 
+    batch_id = "c" * 64
     raw_payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "platform": "binance_copy",
         "accountId": account_id,
         "sourceRecordId": "2",
@@ -168,6 +169,30 @@ def test_binance_trade_upload_is_deterministic_and_private(monkeypatch) -> None:
             "status": "ACTIVE",
         },
         "sourceRecord": {"id": "2"},
+        "collectionBatchId": batch_id,
+        "collectionBatchSize": 1,
+        "positionChanges": [
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "LONG",
+                "before": {
+                    "side": "LONG",
+                    "quantity": "0.10",
+                    "entryPrice": "50000",
+                    "leverage": "10",
+                    "confidence": "LOW",
+                    "status": "ACTIVE",
+                },
+                "after": {
+                    "side": "LONG",
+                    "quantity": "0.15",
+                    "entryPrice": "50000",
+                    "leverage": "10",
+                    "confidence": "LOW",
+                    "status": "ACTIVE",
+                },
+            }
+        ],
     }
     external_id = f"{account_id}:2:r1"
     post = {
@@ -183,6 +208,8 @@ def test_binance_trade_upload_is_deterministic_and_private(monkeypatch) -> None:
         ),
         "rawContent": "熬鹰资本 BTCUSDT 加仓 多头",
         "rawPayload": raw_payload,
+        "batchId": batch_id,
+        "batchSize": 1,
     }
 
     model = Mock()
@@ -207,6 +234,9 @@ def test_binance_trade_upload_is_deterministic_and_private(monkeypatch) -> None:
             assert session.scalar(
                 select(func.count()).select_from(NotificationEvent)
             ) == 1
+            stored_post = session.scalar(select(RawPost))
+            assert stored_post.notification_batch_id == batch_id
+            assert stored_post.notification_batch_size == 1
         model.structure.assert_not_called()
         assert len(ntfy.calls) == 1
 
