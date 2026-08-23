@@ -135,8 +135,6 @@ export interface PositionSnapshot {
   entryPrice?: string;
   currentPrice?: string;
   notional?: string;
-  leverage?: string;
-  positionMargin?: string;
   estimatedPnl?: string;
   priceUpdatedAt?: string;
   confidence: "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
@@ -154,10 +152,7 @@ export interface PositionKolSummary {
   accountId: string;
   marginBalance?: string;
   totalPositionNotional?: string;
-  positionMargin?: string;
   estimatedPnl?: string;
-  effectiveLeverage?: string;
-  activePositionCount: number;
   uncertainPositionCount: number;
   metricsStatus: "COMPLETE" | "PARTIAL" | "UNKNOWN";
   updatedAt?: string;
@@ -178,7 +173,6 @@ export interface PositionOperation {
   quantity?: string;
   price?: string;
   amount?: string;
-  leverage?: string;
   realizedPnl?: string;
   eventTime: string;
 }

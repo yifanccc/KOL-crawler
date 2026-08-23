@@ -41,8 +41,6 @@ def position_payload(position: PositionEstimate) -> dict:
         "entryPrice": position.entry_price,
         "currentPrice": position.mark_price,
         "notional": position.notional,
-        "leverage": position.leverage,
-        "positionMargin": position.position_margin,
         "estimatedPnl": position.estimated_pnl,
         "confidence": position.confidence,
         "status": position.status,
@@ -64,7 +62,6 @@ def operation_payload(operation: PositionOperation) -> dict:
         "quantity": operation.quantity,
         "price": operation.price,
         "amount": operation.amount,
-        "leverage": operation.leverage,
         "realizedPnl": operation.realized_pnl,
         "eventTime": utc_text(operation.event_time),
     }
@@ -97,30 +94,22 @@ def position_summary_payload(
     ]
     total_notional, notional_complete = _sum_values(exposed, "notional")
     estimated_pnl, pnl_complete = _sum_values(exposed, "estimated_pnl")
-    position_margin, margin_complete = _sum_values(exposed, "position_margin")
-    effective_leverage = None
-    if (
-        total_notional is not None
-        and position_margin is not None
-        and position_margin > 0
-        and margin_complete
-    ):
-        effective_leverage = total_notional / position_margin
+    margin_balance = decimal_value(account.margin_balance) if account is not None else None
+    margin_available = margin_balance is not None and margin_balance > 0
 
     if not current or not exposed:
         metrics_status = "UNKNOWN"
         total_notional = None
         estimated_pnl = None
-        position_margin = None
-    elif uncertain or not all(
-        [notional_complete, pnl_complete, margin_complete, effective_leverage is not None]
-    ):
+    elif uncertain or not all([notional_complete, pnl_complete, margin_available]):
         metrics_status = "PARTIAL"
-        if not margin_complete:
-            position_margin = None
-            effective_leverage = None
     else:
         metrics_status = "COMPLETE"
+
+    if not notional_complete:
+        total_notional = None
+    if not pnl_complete:
+        estimated_pnl = None
 
     timestamps = [
         value
@@ -145,10 +134,7 @@ def position_summary_payload(
         "accountId": subscription.platform_account_id,
         "marginBalance": account.margin_balance if account is not None else None,
         "totalPositionNotional": decimal_text(total_notional),
-        "positionMargin": decimal_text(position_margin),
         "estimatedPnl": decimal_text(estimated_pnl),
-        "effectiveLeverage": decimal_text(effective_leverage),
-        "activePositionCount": len(exposed),
         "uncertainPositionCount": len(uncertain),
         "metricsStatus": metrics_status,
         "updatedAt": utc_text(latest),

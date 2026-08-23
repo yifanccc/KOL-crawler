@@ -220,8 +220,6 @@ def test_binance_copy_notification_contains_operation_symbol_position_and_kol_su
                 entry_price="51000",
                 mark_price="52000",
                 notional="7800.00",
-                leverage="10",
-                position_margin="780.00",
                 estimated_pnl="150.00",
                 confidence="LOW",
                 status="ACTIVE",
@@ -241,13 +239,12 @@ def test_binance_copy_notification_contains_operation_symbol_position_and_kol_su
             "positionSide": "LONG",
             "quantity": "0.05",
             "price": "53000",
-            "leverage": "10",
+            "leverage": None,
             "eventTime": "2026-08-09T01:02:00Z",
             "positionAfter": {
                 "side": "LONG",
                 "quantity": "0.15",
                 "entryPrice": "51000",
-                "leverage": "10",
                 "confidence": "LOW",
                 "status": "ACTIVE",
             },
@@ -290,10 +287,11 @@ def test_binance_copy_notification_contains_operation_symbol_position_and_kol_su
     assert "开仓 51,000.00" in message
     assert "现价 52,000.00" in message
     assert "预计盈亏 +150.00 USDT" in message
-    assert "KOL 当前：保证金 137,889.65 USDT" in message
-    assert "持仓总额 7,800.00 USDT" in message
-    assert "持仓保证金 780.00 USDT" in message
-    assert "有效杠杆 10x" in message
+    assert "KOL 当前：账户保证金余额 137,889.65 USDT" in message
+    assert "已估算持仓总额 7,800.00 USDT" in message
+    assert "仓位倍数（估算） 0.06x" in message
+    assert "持仓保证金" not in message
+    assert "有效杠杆" not in message
 
 
 def test_repeated_dispatch_creates_one_event_and_one_publish_call() -> None:

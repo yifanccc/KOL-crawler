@@ -57,8 +57,6 @@ def valued_position_payload() -> dict:
         "entryPrice": "51000",
         "currentPrice": "52000",
         "notional": "5720.00",
-        "leverage": "10",
-        "positionMargin": "572.00",
         "estimatedPnl": "110.00",
         "priceUpdatedAt": "2026-08-12T15:08:00Z",
     }
@@ -77,7 +75,6 @@ def operation_payload(record_id: str, action: str, minute: int) -> dict:
         "quantity": quantity,
         "price": price,
         "amount": str(float(quantity) * float(price)),
-        "leverage": "10",
         "realizedPnl": "0",
         "eventTime": f"2026-08-12T15:{minute:02d}:00Z",
     }
@@ -208,10 +205,7 @@ def test_position_monitor_exposes_one_kol_summary_positions_and_paginated_operat
         "accountId": "5075281354358777856",
         "marginBalance": "137889.65",
         "totalPositionNotional": "5720.00",
-        "positionMargin": "572.00",
         "estimatedPnl": "110.00",
-        "effectiveLeverage": "10",
-        "activePositionCount": 1,
         "uncertainPositionCount": 0,
         "metricsStatus": "COMPLETE",
         "updatedAt": "2026-08-12T15:08:00Z",
@@ -227,8 +221,6 @@ def test_position_monitor_exposes_one_kol_summary_positions_and_paginated_operat
             "entryPrice": "51000",
             "currentPrice": "52000",
             "notional": "5720.00",
-            "leverage": "10",
-            "positionMargin": "572.00",
             "estimatedPnl": "110.00",
             "confidence": "LOW",
             "status": "ACTIVE",
@@ -272,11 +264,42 @@ def test_position_summary_marks_partial_metrics_when_inferred_rows_are_unknown()
 
     assert upload.status_code == 200
     item = response.json()["items"][0]
-    assert item["activePositionCount"] == 0
     assert item["uncertainPositionCount"] == 1
     assert item["totalPositionNotional"] is None
     assert item["estimatedPnl"] is None
     assert item["metricsStatus"] == "UNKNOWN"
+
+
+def test_position_summary_does_not_present_partial_totals_as_complete() -> None:
+    reset_database()
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        subscription_id = create_trade_subscription(client, headers)
+        upload = client.put(
+            f"/api/v1/collector/subscriptions/{subscription_id}/positions",
+            headers=COLLECTOR_HEADERS,
+            json={
+                "agentId": "home-mac-01",
+                "account": {
+                    "marginBalance": "137889.65",
+                    "updatedAt": "2026-08-12T15:08:00Z",
+                },
+                "positions": [
+                    valued_position_payload(),
+                    {
+                        **position_payload("2"),
+                        "symbol": "ETHUSDT",
+                    },
+                ],
+            },
+        )
+        response = client.get("/api/position-kols", headers=headers)
+
+    assert upload.status_code == 200
+    item = response.json()["items"][0]
+    assert item["totalPositionNotional"] is None
+    assert item["estimatedPnl"] is None
+    assert item["metricsStatus"] == "PARTIAL"
 
 
 def test_position_summary_preserves_last_estimate_when_provider_marks_it_stale() -> None:
@@ -298,7 +321,6 @@ def test_position_summary_preserves_last_estimate_when_provider_marks_it_stale()
 
     assert upload.status_code == 200
     item = response.json()["items"][0]
-    assert item["activePositionCount"] == 1
     assert item["uncertainPositionCount"] == 1
     assert item["totalPositionNotional"] == "5720.00"
     assert item["estimatedPnl"] == "110.00"

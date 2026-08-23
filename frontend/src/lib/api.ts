@@ -324,10 +324,6 @@ export function normalizePositions(value: unknown): PositionSnapshot[] {
         ...(text(item.entryPrice) ? { entryPrice: text(item.entryPrice) } : {}),
         ...(text(item.currentPrice) ? { currentPrice: text(item.currentPrice) } : {}),
         ...(text(item.notional) ? { notional: text(item.notional) } : {}),
-        ...(text(item.leverage) ? { leverage: text(item.leverage) } : {}),
-        ...(text(item.positionMargin)
-          ? { positionMargin: text(item.positionMargin) }
-          : {}),
         ...(text(item.estimatedPnl)
           ? { estimatedPnl: text(item.estimatedPnl) }
           : {}),
@@ -370,10 +366,7 @@ function normalizePositionKolSummary(value: unknown): PositionKolSummary | null 
     accountId: text(value.accountId),
     marginBalance: text(value.marginBalance) || undefined,
     totalPositionNotional: text(value.totalPositionNotional) || undefined,
-    positionMargin: text(value.positionMargin) || undefined,
     estimatedPnl: text(value.estimatedPnl) || undefined,
-    effectiveLeverage: text(value.effectiveLeverage) || undefined,
-    activePositionCount: numberValue(value.activePositionCount) ?? 0,
     uncertainPositionCount: numberValue(value.uncertainPositionCount) ?? 0,
     metricsStatus: ["COMPLETE", "PARTIAL", "UNKNOWN"].includes(metricsStatus)
       ? (metricsStatus as PositionKolSummary["metricsStatus"])
@@ -418,8 +411,6 @@ function normalizeDetailPosition(
     entryPrice: text(value.entryPrice) || undefined,
     currentPrice: text(value.currentPrice) || undefined,
     notional: text(value.notional) || undefined,
-    leverage: text(value.leverage) || undefined,
-    positionMargin: text(value.positionMargin) || undefined,
     estimatedPnl: text(value.estimatedPnl) || undefined,
     confidence: ["HIGH", "MEDIUM", "LOW", "UNKNOWN"].includes(confidence)
       ? (confidence as PositionSnapshot["confidence"])
@@ -470,7 +461,6 @@ function normalizePositionOperation(value: unknown): PositionOperation | null {
     quantity: text(value.quantity) || undefined,
     price: text(value.price) || undefined,
     amount: text(value.amount) || undefined,
-    leverage: text(value.leverage) || undefined,
     realizedPnl: text(value.realizedPnl) || undefined,
     eventTime,
   };

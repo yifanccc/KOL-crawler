@@ -2,20 +2,23 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ChevronRight, RefreshCw } from "lucide-react";
+import { ArrowUpRight, Clock3, RefreshCw } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
+import { KolAvatar } from "@/components/KolAvatar";
+import { PlatformMark } from "@/components/PlatformMark";
+import { PositionMetricGuide } from "@/components/PositionMetricGuide";
 import { Sidebar } from "@/components/Sidebar";
 import { fetchPositionKols } from "@/lib/api";
-import { leverageText, moneyText, pnlText } from "@/lib/positions";
+import { accountMultipleText, moneyText, pnlText } from "@/lib/positions";
 import type { PositionKolSummary } from "@/lib/types";
 
 
 const metricStatusLabels: Record<PositionKolSummary["metricsStatus"], string> = {
-  COMPLETE: "完整估算",
-  PARTIAL: "部分数据缺失",
-  UNKNOWN: "暂不可估算",
+  COMPLETE: "指标齐全",
+  PARTIAL: "指标有缺口",
+  UNKNOWN: "暂无指标",
 };
 
 function timeText(value?: string): string {
@@ -67,11 +70,11 @@ export function PositionsDashboard() {
     <div className="dashboard-shell">
       <Sidebar />
       <main className="positions-stage">
-        <header className="positions-header">
+        <header className="positions-header positions-overview-header">
           <div>
-            <p className="eyebrow">Position Ledger</p>
+            <p className="eyebrow">Position Monitor</p>
             <h1>持仓监控</h1>
-            <p>先看 KOL 账户汇总，再进入详情查看每个持仓和操作流水。</p>
+            <p>一张卡看清一个 KOL 的资金规模、可估算仓位敞口与浮动盈亏。</p>
           </div>
           <div className="positions-header-actions">
             <button
@@ -89,15 +92,7 @@ export function PositionsDashboard() {
           </div>
         </header>
 
-        <div className="position-disclaimer" role="note">
-          <AlertTriangle size={18} aria-hidden="true" />
-          <div>
-            <strong>仓位、开仓价与盈亏来自成交记录推算</strong>
-            <span>保证金来自 Binance 组合详情，现价采用 Futures 标记价格；缺失字段会明确标注，不使用默认杠杆补齐。</span>
-          </div>
-        </div>
-
-        {loading ? <div className="state-panel">正在读取 KOL 账户汇总...</div> : null}
+        {loading ? <div className="state-panel">正在读取 KOL 仓位...</div> : null}
         {!loading && error && items.length === 0 ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : null}
@@ -112,72 +107,79 @@ export function PositionsDashboard() {
         ) : null}
 
         {items.length > 0 ? (
-          <section className="position-ledger" aria-label="KOL 持仓账户汇总">
-            <header className="position-ledger-heading">
-              <div>
-                <p className="eyebrow">KOL Account Summary</p>
-                <h2>KOL 账户总览</h2>
-              </div>
-              <span>{items.length} 个 KOL · 一人一行</span>
-            </header>
-            <div className="position-table-scroll">
-              <table className="position-table position-summary-table">
-                <thead>
-                  <tr>
-                    <th>KOL</th>
-                    <th>保证金</th>
-                    <th>持仓总金额</th>
-                    <th>持仓保证金</th>
-                    <th>持仓盈亏（估算）</th>
-                    <th>有效杠杆</th>
-                    <th>数据状态</th>
-                    <th aria-label="查看详情" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <tr key={item.subscriptionId}>
-                      <th scope="row">
-                        <Link href={`/positions/${item.subscriptionId}`}>
-                          <strong>{item.kolName}</strong>
-                          <span>Portfolio {item.accountId}</span>
-                        </Link>
-                      </th>
-                      <td>{moneyText(item.marginBalance)}</td>
-                      <td>{moneyText(item.totalPositionNotional)}</td>
-                      <td>{moneyText(item.positionMargin)}</td>
-                      <td className={pnlClass(item.estimatedPnl)}>
-                        {pnlText(item.estimatedPnl)}
-                      </td>
-                      <td>{leverageText(item.effectiveLeverage)}</td>
-                      <td>
-                        <span className={`position-quality quality-${item.metricsStatus.toLowerCase()}`}>
-                          {metricStatusLabels[item.metricsStatus]}
-                        </span>
-                        <small>
-                          {item.activePositionCount} 个持仓
-                          {item.uncertainPositionCount
-                            ? ` · ${item.uncertainPositionCount} 个待确认`
-                            : ""}
-                          {` · ${timeText(item.updatedAt)}`}
-                        </small>
-                      </td>
-                      <td>
-                        <Link
-                          className="position-row-open"
-                          href={`/positions/${item.subscriptionId}`}
-                          aria-label={`查看 ${item.kolName} 持仓详情`}
-                        >
-                          <ChevronRight size={17} aria-hidden="true" />
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <section className="position-kol-grid" aria-label="KOL 持仓核心指标">
+            {items.map((item) => (
+              <Link
+                className="position-kol-card"
+                href={`/positions/${item.subscriptionId}`}
+                key={item.subscriptionId}
+              >
+                <header>
+                  <div className="position-kol-identity">
+                    <KolAvatar
+                      kol={{
+                        id: item.kolId,
+                        name: item.kolName,
+                        platform: item.platform,
+                      }}
+                      platform={item.platform}
+                      size={46}
+                    />
+                    <div>
+                      <h2>{item.kolName}</h2>
+                      <p>
+                        <PlatformMark platform={item.platform} withLabel />
+                        <span>Portfolio {item.accountId}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`position-quality quality-${item.metricsStatus.toLowerCase()}`}>
+                    {metricStatusLabels[item.metricsStatus]}
+                  </span>
+                </header>
+
+                <div className="position-kol-card-body">
+                  <div className="position-kol-pnl">
+                    <span>当前预计盈亏</span>
+                    <strong className={pnlClass(item.estimatedPnl)}>
+                      {pnlText(item.estimatedPnl)}
+                    </strong>
+                    <small>未计手续费与资金费</small>
+                  </div>
+                  <dl className="position-kol-metrics">
+                    <div>
+                      <dt>账户保证金余额</dt>
+                      <dd>{moneyText(item.marginBalance)}</dd>
+                    </div>
+                    <div>
+                      <dt>已估算持仓总额</dt>
+                      <dd>{moneyText(item.totalPositionNotional)}</dd>
+                    </div>
+                    <div>
+                      <dt>仓位倍数（估算）</dt>
+                      <dd>{accountMultipleText(item.totalPositionNotional, item.marginBalance)}</dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <footer>
+                  <span>
+                    <Clock3 size={13} aria-hidden="true" />
+                    更新于 {timeText(item.updatedAt)}
+                    {item.uncertainPositionCount
+                      ? ` · ${item.uncertainPositionCount} 个仓位待确认`
+                      : ""}
+                  </span>
+                  <strong>
+                    查看仓位详情 <ArrowUpRight size={15} aria-hidden="true" />
+                  </strong>
+                </footer>
+              </Link>
+            ))}
           </section>
         ) : null}
+
+        {items.length > 0 ? <PositionMetricGuide /> : null}
       </main>
     </div>
   );

@@ -115,6 +115,23 @@ def _quantity(value: Decimal | str | None) -> str:
     return format(decimal_value.normalize(), "f")
 
 
+def _account_multiple(
+    total_notional: Decimal | str | None,
+    margin_balance: Decimal | str | None,
+) -> str:
+    if total_notional is None or margin_balance is None:
+        return "暂不可估算"
+    notional_value = (
+        total_notional if isinstance(total_notional, Decimal) else Decimal(total_notional)
+    )
+    margin_value = (
+        margin_balance if isinstance(margin_balance, Decimal) else Decimal(margin_balance)
+    )
+    if margin_value <= 0:
+        return "暂不可估算"
+    return f"{notional_value / margin_value:,.2f}x"
+
+
 def _trade_notification(
     session: Session,
     signal: Signal,
@@ -180,9 +197,8 @@ def _trade_notification(
     entry_price = (
         current.entry_price if current is not None else trade.position_after.entry_price
     )
-    leverage = summary["effectiveLeverage"]
-    leverage_text = (
-        f"{_quantity(leverage)}x" if leverage is not None else "数据源未提供"
+    account_multiple = _account_multiple(
+        summary["totalPositionNotional"], summary["marginBalance"]
     )
     return "\n".join(
         [
@@ -200,12 +216,11 @@ def _trade_notification(
                 f"现价 {_number(current.mark_price if current else None)}｜"
                 f"预计盈亏 {_money(current.estimated_pnl if current else None, signed=True)}"
             ),
-            f"KOL 当前：保证金 {_money(summary['marginBalance'])}",
+            f"KOL 当前：账户保证金余额 {_money(summary['marginBalance'])}",
             (
-                f"持仓总额 {_money(summary['totalPositionNotional'])}｜"
-                f"持仓保证金 {_money(summary['positionMargin'])}｜"
-                f"预计盈亏 {_money(summary['estimatedPnl'], signed=True)}｜"
-                f"有效杠杆 {leverage_text}"
+                f"已估算持仓总额 {_money(summary['totalPositionNotional'])}｜"
+                f"仓位倍数（估算） {account_multiple}｜"
+                f"预计盈亏 {_money(summary['estimatedPnl'], signed=True)}"
             ),
         ]
     )

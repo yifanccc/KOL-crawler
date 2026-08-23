@@ -2,23 +2,27 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, Clock3, RefreshCw } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
+import { PositionMetricGuide } from "@/components/PositionMetricGuide";
 import { Sidebar } from "@/components/Sidebar";
 import { fetchPositionKolDetail, fetchPositionOperations } from "@/lib/api";
 import {
-  leverageText,
+  accountMultipleText,
+  currentPositions,
   moneyText,
+  multipleText,
   pnlText,
   priceText,
   quantityText,
+  summarizePositionExposure,
 } from "@/lib/positions";
 import type {
   PositionKolDetail as PositionKolDetailData,
+  PositionKolSummary,
   PositionOperationPage,
-  PositionSnapshot,
 } from "@/lib/types";
 
 
@@ -30,12 +34,17 @@ const actionLabels = {
   REVERSE: "反手",
   CORRECTION: "交易修订",
 };
-const sideLabels = { LONG: "多", SHORT: "空", FLAT: "空仓", UNKNOWN: "未知" };
+const sideLabels = { LONG: "多", SHORT: "空", FLAT: "空仓", UNKNOWN: "方向待确认" };
 const statusLabels = { ACTIVE: "持仓中", FLAT: "已平仓", STALE: "数据陈旧", UNKNOWN: "待确认" };
+const metricStatusLabels: Record<PositionKolSummary["metricsStatus"], string> = {
+  COMPLETE: "指标齐全",
+  PARTIAL: "指标有缺口",
+  UNKNOWN: "暂无指标",
+};
 const PAGE_SIZE = 50;
 
 function dateTimeText(value?: string): string {
-  if (!value) return "未知";
+  if (!value) return "时间未知";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("zh-CN", {
@@ -55,10 +64,8 @@ function valueClass(value?: string): string {
   return parsed > 0 ? "value-positive" : "value-negative";
 }
 
-function sideClass(side: PositionSnapshot["side"] | "LONG" | "SHORT" | "UNKNOWN") {
-  if (side === "LONG") return "side-long-text";
-  if (side === "SHORT") return "side-short-text";
-  return "";
+function numberMoneyText(value: number | null): string {
+  return value === null ? "暂不可估算" : moneyText(String(value));
 }
 
 export function PositionKolDetail({
@@ -110,18 +117,37 @@ export function PositionKolDetail({
   }, [load, offset]);
 
   const summary = detail?.summary;
+  const positions = detail ? currentPositions(detail.positions) : [];
+  const exposure = detail
+    ? summarizePositionExposure(positions, summary?.marginBalance)
+    : null;
+  const exposureExclusionText = exposure
+    ? [
+        exposure.unresolvedCount
+          ? `${exposure.unresolvedCount} 个方向或状态待确认`
+          : "",
+        exposure.missingNotionalCount
+          ? `${exposure.missingNotionalCount} 个缺少名义金额`
+          : "",
+      ].filter(Boolean).join("，")
+    : "";
+
   return (
     <div className="dashboard-shell">
       <Sidebar />
       <main className="positions-stage">
-        <header className="positions-header">
+        <header className="positions-header position-detail-header">
           <div>
             <Link className="back-link" href="/positions">
-              <ArrowLeft size={14} aria-hidden="true" />返回 KOL 总览
+              <ArrowLeft size={14} aria-hidden="true" />返回持仓监控
             </Link>
             <p className="eyebrow">KOL Position Detail</p>
             <h1>{summary?.kolName || "KOL 持仓详情"}</h1>
-            <p>{summary ? `Binance Copy · Portfolio ${summary.accountId}` : "正在读取组合信息"}</p>
+            <p>
+              {summary
+                ? `Binance Copy · Portfolio ${summary.accountId} · 由成交记录持续推算`
+                : "正在读取组合信息"}
+            </p>
           </div>
           <div className="positions-header-actions">
             <button
@@ -136,64 +162,181 @@ export function PositionKolDetail({
         </header>
 
         {summary ? (
-          <section className="kol-position-strip" aria-label="KOL 账户核心数据">
-            <dl>
-              <div><dt>保证金</dt><dd>{moneyText(summary.marginBalance)}</dd></div>
-              <div><dt>持仓总金额</dt><dd>{moneyText(summary.totalPositionNotional)}</dd></div>
-              <div><dt>持仓保证金</dt><dd>{moneyText(summary.positionMargin)}</dd></div>
-              <div><dt>持仓盈亏（估算）</dt><dd className={valueClass(summary.estimatedPnl)}>{pnlText(summary.estimatedPnl)}</dd></div>
-              <div><dt>有效杠杆</dt><dd>{leverageText(summary.effectiveLeverage)}</dd></div>
-            </dl>
-          </section>
+          <>
+            <section className="position-account-overview" aria-label="KOL 账户核心指标">
+              <header className="position-section-heading">
+                <div>
+                  <p className="eyebrow">Account Snapshot</p>
+                  <h2>账户概况</h2>
+                </div>
+                <div className="position-account-state">
+                  <span className={`position-quality quality-${summary.metricsStatus.toLowerCase()}`}>
+                    {metricStatusLabels[summary.metricsStatus]}
+                  </span>
+                  <small>更新于 {dateTimeText(summary.updatedAt)}</small>
+                </div>
+              </header>
+
+              <div className="position-account-core">
+                <div className="position-account-pnl">
+                  <span>当前预计盈亏</span>
+                  <strong className={valueClass(summary.estimatedPnl)}>
+                    {pnlText(summary.estimatedPnl)}
+                  </strong>
+                  <small>未计手续费与资金费</small>
+                </div>
+                <dl>
+                  <div>
+                    <dt>账户保证金余额</dt>
+                    <dd>{moneyText(summary.marginBalance)}</dd>
+                  </div>
+                  <div>
+                    <dt>已估算持仓总额</dt>
+                    <dd>{moneyText(summary.totalPositionNotional)}</dd>
+                  </div>
+                  <div>
+                    <dt>仓位倍数（估算）</dt>
+                    <dd>{accountMultipleText(summary.totalPositionNotional, summary.marginBalance)}</dd>
+                  </div>
+                </dl>
+              </div>
+            </section>
+
+            {exposure ? (
+              <section className="position-exposure-summary" aria-label="多空仓位汇总">
+                <header className="position-section-heading">
+                  <div>
+                    <p className="eyebrow">Exposure Split</p>
+                    <h2>仓位汇总</h2>
+                  </div>
+                  <span>按可估算名义金额统计</span>
+                </header>
+                <div className="position-exposure-body">
+                  <article className="position-exposure-side exposure-long">
+                    <span>多头仓位</span>
+                    <strong>{numberMoneyText(exposure.long.notional)}</strong>
+                    <small>
+                      {exposure.long.count} 个 · 占账户 {multipleText(exposure.long.accountMultiple)}
+                    </small>
+                  </article>
+                  <div className="position-exposure-rail-wrap">
+                    <div
+                      className="position-exposure-rail"
+                      aria-label={
+                        exposure.longShare === null
+                          ? "多空名义金额暂不可估算"
+                          : `多头 ${Math.round(exposure.longShare * 100)}%，空头 ${Math.round((exposure.shortShare ?? 0) * 100)}%`
+                      }
+                    >
+                      {exposure.longShare !== null ? (
+                        <>
+                          <span
+                            className="exposure-rail-long"
+                            style={{ width: `${exposure.longShare * 100}%` }}
+                          />
+                          <span
+                            className="exposure-rail-short"
+                            style={{ width: `${(exposure.shortShare ?? 0) * 100}%` }}
+                          />
+                        </>
+                      ) : (
+                        <span className="exposure-rail-empty" />
+                      )}
+                    </div>
+                    <div>
+                      <span>多 {exposure.longShare === null ? "—" : `${Math.round(exposure.longShare * 100)}%`}</span>
+                      <span>空 {exposure.shortShare === null ? "—" : `${Math.round(exposure.shortShare * 100)}%`}</span>
+                    </div>
+                  </div>
+                  <article className="position-exposure-side exposure-short">
+                    <span>空头仓位</span>
+                    <strong>{numberMoneyText(exposure.short.notional)}</strong>
+                    <small>
+                      {exposure.short.count} 个 · 占账户 {multipleText(exposure.short.accountMultiple)}
+                    </small>
+                  </article>
+                </div>
+                {exposureExclusionText ? (
+                  <p>{exposureExclusionText}，未计入多空金额和占比。</p>
+                ) : null}
+              </section>
+            ) : null}
+          </>
         ) : null}
 
         <nav className="positions-tabs" aria-label="KOL 持仓详情子页面">
           <Link className={initialView === "positions" ? "active" : ""} href={`/positions/${subscriptionId}`}>
-            当前持仓{detail ? ` ${detail.positions.length}` : ""}
+            当前持仓{detail ? ` ${positions.length}` : ""}
           </Link>
           <Link className={initialView === "operations" ? "active" : ""} href={`/positions/${subscriptionId}?view=operations`}>
             操作记录{operations.total ? ` ${operations.total}` : ""}
           </Link>
         </nav>
 
-        <div className="position-disclaimer" role="note">
-          <AlertTriangle size={18} aria-hidden="true" />
-          <div>
-            <strong>所有带“估算”的字段都不是交易所真实持仓回报</strong>
-            <span>操作记录来自已成交订单；当前持仓由这些记录连续推演，历史缺口会降低可信度。</span>
-          </div>
-        </div>
-
         {loading ? <div className="state-panel">正在读取持仓账本...</div> : null}
         {!loading && error && !detail ? <ErrorState message={error} onRetry={() => void load(0)} /> : null}
         {!loading && error && detail ? <div className="state-panel error">刷新失败：{error}</div> : null}
 
         {!loading && detail && initialView === "positions" ? (
-          detail.positions.length ? (
-            <section className="position-ledger" aria-label="当前持仓">
-              <header className="position-ledger-heading">
+          positions.length ? (
+            <section className="position-detail-section" aria-label="当前持仓">
+              <header className="position-section-heading">
                 <div><p className="eyebrow">Current Positions</p><h2>当前持仓</h2></div>
-                <span>一仓一行 · 行情每 10 分钟更新</span>
+                <span>{positions.length} 个仓位 · 标记价格每 10 分钟更新</span>
               </header>
-              <div className="position-table-scroll">
-                <table className="position-table position-detail-table">
-                  <thead><tr><th>品种</th><th>方向</th><th>当前价格</th><th>开仓价格</th><th>持仓数量</th><th>持仓金额</th><th>杠杆</th><th>预计盈亏</th><th>状态</th></tr></thead>
-                  <tbody>
-                    {detail.positions.map((position) => (
-                      <tr key={`${position.symbol}:${position.positionSide}`}>
-                        <th scope="row"><strong>{position.symbol}</strong><span>{dateTimeText(position.asOfEventTime)}</span></th>
-                        <td className={sideClass(position.side)}>{sideLabels[position.side]}</td>
-                        <td>{priceText(position.currentPrice)}</td>
-                        <td>{priceText(position.entryPrice)}</td>
-                        <td>{quantityText(position.quantity)}</td>
-                        <td>{moneyText(position.notional)}</td>
-                        <td>{leverageText(position.leverage)}</td>
-                        <td className={valueClass(position.estimatedPnl)}>{pnlText(position.estimatedPnl)}</td>
-                        <td><span className={`position-state state-${position.status.toLowerCase()}`}>{statusLabels[position.status]}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="position-holding-list">
+                {positions.map((position) => (
+                  <article
+                    className={`position-holding-card holding-${position.side.toLowerCase()}`}
+                    key={`${position.symbol}:${position.positionSide}`}
+                  >
+                    <header>
+                      <div>
+                        <h3>{position.symbol}</h3>
+                        <p>
+                          <span className={`position-side-badge badge-${position.side.toLowerCase()}`}>
+                            {sideLabels[position.side]}
+                          </span>
+                          <span className={`position-state state-${position.status.toLowerCase()}`}>
+                            {statusLabels[position.status]}
+                          </span>
+                        </p>
+                      </div>
+                      {position.estimatedPnl !== undefined ? (
+                        <div className="position-holding-pnl">
+                          <span>预计盈亏</span>
+                          <strong className={valueClass(position.estimatedPnl)}>
+                            {pnlText(position.estimatedPnl)}
+                          </strong>
+                        </div>
+                      ) : null}
+                    </header>
+
+                    <dl>
+                      {position.currentPrice !== undefined ? (
+                        <div><dt>标记价格</dt><dd>{priceText(position.currentPrice)}</dd></div>
+                      ) : null}
+                      {position.entryPrice !== undefined ? (
+                        <div><dt>推算开仓价</dt><dd>{priceText(position.entryPrice)}</dd></div>
+                      ) : null}
+                      {position.quantity !== undefined ? (
+                        <div><dt>推算持仓数量</dt><dd>{quantityText(position.quantity)}</dd></div>
+                      ) : null}
+                      {position.notional !== undefined ? (
+                        <div><dt>名义金额</dt><dd>{moneyText(position.notional)}</dd></div>
+                      ) : null}
+                    </dl>
+
+                    <footer>
+                      {position.asOfEventTime ? (
+                        <span><Clock3 size={13} aria-hidden="true" />最近操作 {dateTimeText(position.asOfEventTime)}</span>
+                      ) : null}
+                      {position.priceUpdatedAt ? (
+                        <span><RefreshCw size={13} aria-hidden="true" />标记价 {dateTimeText(position.priceUpdatedAt)}</span>
+                      ) : null}
+                    </footer>
+                  </article>
+                ))}
               </div>
             </section>
           ) : (
@@ -203,29 +346,47 @@ export function PositionKolDetail({
 
         {!loading && detail && initialView === "operations" ? (
           operations.items.length ? (
-            <section className="position-ledger" aria-label="持仓操作记录">
-              <header className="position-ledger-heading">
-                <div><p className="eyebrow">Operation Tape</p><h2>操作记录</h2></div>
+            <section className="position-detail-section" aria-label="持仓操作记录">
+              <header className="position-section-heading">
+                <div><p className="eyebrow">Operation Timeline</p><h2>操作记录</h2></div>
                 <span>共 {operations.total} 条 · 最新在前</span>
               </header>
-              <div className="position-table-scroll">
-                <table className="position-table position-operation-table">
-                  <thead><tr><th>操作时间</th><th>品种</th><th>操作</th><th>方向</th><th>开仓/平仓价格</th><th>开仓/平仓数量</th><th>金额</th></tr></thead>
-                  <tbody>
-                    {operations.items.map((operation) => (
-                      <tr key={`${operation.sourceRecordId}:${operation.revision}`}>
-                        <th scope="row">{dateTimeText(operation.eventTime)}</th>
-                        <td><strong>{operation.symbol}</strong></td>
-                        <td>{actionLabels[operation.action]}</td>
-                        <td className={sideClass(operation.positionSide)}>{sideLabels[operation.positionSide]}</td>
-                        <td>{priceText(operation.price)}</td>
-                        <td>{quantityText(operation.quantity)}</td>
-                        <td>{moneyText(operation.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ol className="position-operation-list">
+                {operations.items.map((operation) => (
+                  <li key={`${operation.sourceRecordId}:${operation.revision}`}>
+                    <span className={`position-operation-marker marker-${operation.positionSide.toLowerCase()}`} />
+                    <article>
+                      <header>
+                        <div>
+                          <span className="position-action-badge">{actionLabels[operation.action]}</span>
+                          <span className={`position-side-badge badge-${operation.positionSide.toLowerCase()}`}>
+                            {sideLabels[operation.positionSide]}
+                          </span>
+                        </div>
+                        <time dateTime={operation.eventTime}>{dateTimeText(operation.eventTime)}</time>
+                      </header>
+                      <h3>{operation.symbol}</h3>
+                      <dl>
+                        {operation.price !== undefined ? (
+                          <div><dt>成交均价</dt><dd>{priceText(operation.price)}</dd></div>
+                        ) : null}
+                        {operation.quantity !== undefined ? (
+                          <div><dt>成交数量</dt><dd>{quantityText(operation.quantity)}</dd></div>
+                        ) : null}
+                        {operation.amount !== undefined ? (
+                          <div><dt>成交金额</dt><dd>{moneyText(operation.amount)}</dd></div>
+                        ) : null}
+                        {operation.realizedPnl !== undefined && Number(operation.realizedPnl) !== 0 ? (
+                          <div>
+                            <dt>已实现盈亏</dt>
+                            <dd className={valueClass(operation.realizedPnl)}>{pnlText(operation.realizedPnl)}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </article>
+                  </li>
+                ))}
+              </ol>
               <footer className="position-pagination">
                 <button type="button" disabled={offset === 0 || refreshing} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>上一页</button>
                 <span>{offset + 1}–{Math.min(offset + operations.items.length, operations.total)} / {operations.total}</span>
@@ -236,6 +397,8 @@ export function PositionKolDetail({
             <EmptyState title="暂无操作记录" description="完成成交基线后，新抓取到的已成交操作会显示在这里。" />
           )
         ) : null}
+
+        {detail ? <PositionMetricGuide /> : null}
       </main>
     </div>
   );

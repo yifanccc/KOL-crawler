@@ -12,16 +12,13 @@ const summary = {
   accountId: "5075281354358777856",
   marginBalance: "137889.65",
   totalPositionNotional: "5720.00",
-  positionMargin: null,
   estimatedPnl: "110.00",
-  effectiveLeverage: null,
-  activePositionCount: 1,
   uncertainPositionCount: 0,
-  metricsStatus: "PARTIAL",
+  metricsStatus: "COMPLETE",
   updatedAt: "2026-08-12T15:08:00Z",
 };
 
-test("normalizes one KOL summary per subscription with explicit unknown metrics", () => {
+test("normalizes one KOL summary with only supported metrics", () => {
   assert.deepEqual(api.normalizePositionKols({ items: [summary] }), [
     {
       subscriptionId: 5,
@@ -31,12 +28,9 @@ test("normalizes one KOL summary per subscription with explicit unknown metrics"
       accountId: "5075281354358777856",
       marginBalance: "137889.65",
       totalPositionNotional: "5720.00",
-      positionMargin: undefined,
       estimatedPnl: "110.00",
-      effectiveLeverage: undefined,
-      activePositionCount: 1,
       uncertainPositionCount: 0,
-      metricsStatus: "PARTIAL",
+      metricsStatus: "COMPLETE",
       updatedAt: "2026-08-12T15:08:00Z",
     },
   ]);
@@ -55,8 +49,6 @@ test("normalizes KOL detail positions and operation pagination", () => {
           entryPrice: "51000",
           currentPrice: "52000",
           notional: "5720.00",
-          leverage: null,
-          positionMargin: null,
           estimatedPnl: "110.00",
           confidence: "LOW",
           status: "ACTIVE",
@@ -70,7 +62,6 @@ test("normalizes KOL detail positions and operation pagination", () => {
   });
   assert.equal(detail?.summary.kolName, "熬鹰资本");
   assert.equal(detail?.positions[0].entryPrice, "51000");
-  assert.equal(detail?.positions[0].leverage, undefined);
 
   assert.deepEqual(
     api.normalizePositionOperations(
@@ -86,7 +77,6 @@ test("normalizes KOL detail positions and operation pagination", () => {
             quantity: "0.05",
             price: "53000",
             amount: "2650.00",
-            leverage: null,
             realizedPnl: "0",
             eventTime: "2026-08-12T15:02:00Z",
           },
@@ -109,7 +99,6 @@ test("normalizes KOL detail positions and operation pagination", () => {
           quantity: "0.05",
           price: "53000",
           amount: "2650.00",
-          leverage: undefined,
           realizedPnl: "0",
           eventTime: "2026-08-12T15:02:00Z",
         },
