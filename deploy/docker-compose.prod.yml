@@ -62,11 +62,11 @@ services:
     build:
       context: ../frontend
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://www.yifanlab.cloud/kol
+        NEXT_PUBLIC_API_BASE_URL: https://www.yifanlab.cloud/kol
         NEXT_PUBLIC_BASE_PATH: /kol
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://www.yifanlab.cloud/kol
+      NEXT_PUBLIC_API_BASE_URL: https://www.yifanlab.cloud/kol
       NEXT_PUBLIC_BASE_PATH: /kol
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-kol_session}
     depends_on:
