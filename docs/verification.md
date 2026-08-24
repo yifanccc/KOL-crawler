@@ -222,6 +222,24 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - 本地 API 已重新构建并重启，`GET /health` 为 200；MySQL 已存在 `notification_batch_id`、`notification_batch_size` 和组合索引。launchd Collector 已于北京时间 20:19 重启并加载当前分支代码，本地待上传 Outbox 和死信均为 0。
 - 本轮没有伪造真实成交，也没有向用户的真实 ntfy topic 发送测试通知；首次真实汇总推送需等待 Binance 后续出现实际仓位变动。
 
+### Binance Copy 仓位监控生产部署
+
+2026-08-24 将专属分支 `codex/okx-binance-trade-monitor-design` 的 API、Web 与数据库迁移部署到 `/home/deploy/kol-crawler`。发布前完整备份位于：
+
+```text
+/home/deploy/kol-crawler/.runtime/deploy-backups/binance-position-batch-20260824223523
+```
+
+发布只重建并替换 API、Web；MySQL、Redis、Nginx 和生产 `.env` 未重启或改写。同步时发现文档中的根目录 `rsync --delete` 会删除服务器独有备份，因此本次改用不删除远端文件的受限同步，并排除 `.env*`、`backups/`、`.runtime/`、`.git/` 与构建缓存。生产 `.env` 的 SHA256 在同步前后保持一致。
+
+- API `/health` 返回 200；公网 `/kol/login` 返回 200，未登录 `/kol/positions` 返回 307 到登录页，未认证 `/kol/api/position-kols` 返回 401。API/Web 最近日志无启动异常。
+- MySQL 已存在 `raw_posts.notification_batch_id`、`notification_batch_size` 与 `ix_raw_posts_subscription_notification_batch` 索引。
+- 生产新增且仅新增一个 Binance Copy 私域订阅：熬鹰资本、Portfolio ID `5075281354358777856`、10 分钟、无 prompt；订阅级 ntfy 规则沿用生产默认 server/topic，已启用且配置完整。
+- 重启本机 launchd Collector 后，首轮真实读取返回 100 条成交并以 `baseline_created` 完成；生产已收到 13 条仓位状态、100 条操作记录和账户保证金快照。当前 1 条仓位可完整估算，4 条历史窗口不足的仓位保持 `UNKNOWN`，KOL 汇总明确标为 `PARTIAL`，没有把未知数量或成本补成 0。
+- 生产 heartbeat 为 `healthy`，provider 状态为 Binance Copy `healthy`、Binance Square `healthy`、X `authenticated`，Outbox 为 0。首次基线没有生成 RawPost、Signal 或 NotificationEvent，也没有发送人工 ntfy 测试；后续只有真实仓位结构变化才会按单轮采集合并推送。
+- 容器内 OpenAI-compatible 实请求使用 `deepseek-v4-flash` 与 `chat_completions` 成功返回合法结构，HTTP/HTTPS proxy 均已注入，`used_fallback=false`。
+- 部署后磁盘剩余约 2.8 GB（使用率 93%）；未执行全局 Docker prune，以免删除其他项目缓存或本次回滚镜像。Web 构建仍报告 4 个 high severity npm 依赖项，本次没有做超出范围的破坏性升级。
+
 ## 外部前置条件
 
 - ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。
