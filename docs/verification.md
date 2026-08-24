@@ -232,7 +232,7 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 
 发布只重建并替换 API、Web；MySQL、Redis、Nginx 和生产 `.env` 未重启或改写。同步时发现文档中的根目录 `rsync --delete` 会删除服务器独有备份，因此本次改用不删除远端文件的受限同步，并排除 `.env*`、`backups/`、`.runtime/`、`.git/` 与构建缓存。生产 `.env` 的 SHA256 在同步前后保持一致。
 
-- API `/health` 返回 200；公网 `/kol/login` 返回 200，未登录 `/kol/positions` 返回 307 到登录页，未认证 `/kol/api/position-kols` 返回 401。API/Web 最近日志无启动异常。
+- API `/health` 返回 200；HTTPS 公网 `/kol/login` 返回 200，未登录 `/kol/positions` 返回 307 到 HTTPS 登录页，未认证 `/kol/api/position-kols` 返回 401。API/Web 最近日志无启动异常。
 - MySQL 已存在 `raw_posts.notification_batch_id`、`notification_batch_size` 与 `ix_raw_posts_subscription_notification_batch` 索引。
 - 生产新增且仅新增一个 Binance Copy 私域订阅：熬鹰资本、Portfolio ID `5075281354358777856`、10 分钟、无 prompt；订阅级 ntfy 规则沿用生产默认 server/topic，已启用且配置完整。
 - 重启本机 launchd Collector 后，首轮真实读取返回 100 条成交并以 `baseline_created` 完成；生产已收到 13 条仓位状态、100 条操作记录和账户保证金快照。当前 1 条仓位可完整估算，4 条历史窗口不足的仓位保持 `UNKNOWN`，KOL 汇总明确标为 `PARTIAL`，没有把未知数量或成本补成 0。
@@ -245,4 +245,4 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。
 - X 首次登录必须在采集机人工执行；本次机器登录态有效并已完成真实读取。
 - 前端生产依赖仍有 2 个 moderate npm audit 项，升级前应逐项审阅 changelog 与锁文件变化。
-- 当前用户明确选择暂不配置证书，公网登录 Cookie 与 Collector token 仍通过 HTTP 明文传输；这是已知的临时安全缺口，不代表 HTTPS 验收通过。
+- 2026-08-24 已验证 HTTPS `/kol/login` 返回 200、持仓页登录跳转与 API 认证边界正常；HTTP 入口仍可直接访问而非强制跳转，使用时应固定访问 HTTPS，后续可单独配置全站 HTTP 到 HTTPS 重定向。
