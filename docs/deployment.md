@@ -7,9 +7,10 @@
 服务器目录固定为 `/home/deploy/kol-crawler`。同步代码时不能覆盖服务器 `.env`：
 
 ```bash
-rsync -az --delete \
-  --exclude='.git/' --exclude='.DS_Store' --exclude='.env' \
-  --exclude='node_modules/' --exclude='.next/' --exclude='.runtime/' \
+rsync -az \
+  --exclude='.git/' --exclude='.DS_Store' --exclude='.env*' \
+  --exclude='backups/' --exclude='node_modules/' --exclude='.next/' \
+  --exclude='.runtime/' \
   ./ deploy@www.yifanlab.cloud:/home/deploy/kol-crawler/
 ```
 
@@ -23,7 +24,7 @@ ssh deploy@www.yifanlab.cloud 'chmod 600 /home/deploy/kol-crawler/.env'
 生产 Compose 会强制使用以下部署参数，不需要改动本机 `.env`：
 
 - `WEB_ORIGIN=http://www.yifanlab.cloud`
-- `PUBLIC_API_BASE_URL=http://www.yifanlab.cloud/kol`
+- `PUBLIC_API_BASE_URL=https://www.yifanlab.cloud/kol`
 - `NEXT_PUBLIC_BASE_PATH=/kol`
 - `COOKIE_SECURE=false`
 - `ENABLE_SCHEDULER=false`
@@ -139,7 +140,7 @@ curl -I http://www.yifanlab.cloud/kol/login
 
 根路径应继续返回原站点；`/kol` 未登录时应跳转到 `/kol/login`；登录页和 `/kol/_next/` 静态资源应返回 200。
 
-当前部署明确暂不处理证书，所以登录 Cookie 与 Collector token 都通过明文 HTTP 传输。只应把它当作临时状态。启用正确证书后，将 Compose 中 Web/API 地址改成 `https://www.yifanlab.cloud/kol`，设置 `WEB_ORIGIN=https://www.yifanlab.cloud`、`COOKIE_SECURE=true`，重建 Web/API，并把本机 `collector/.env` 的 `PUBLIC_API_URL` 改为 HTTPS。
+当前证书和 HTTPS `/kol` 已可用，浏览器 API 地址必须保持为 `https://www.yifanlab.cloud/kol`，否则 HTTPS 登录页会因混合内容显示 `Failed to fetch`。HTTP 入口、Collector URL 和非 Secure Cookie 仍是待单独收口的兼容状态；后续强制 HTTPS 时再设置 `WEB_ORIGIN=https://www.yifanlab.cloud`、`COOKIE_SECURE=true`，重建 API，并把本机 `collector/.env` 的 `PUBLIC_API_URL` 改为 HTTPS。
 
 ### 回滚
 
@@ -163,7 +164,7 @@ docker compose ps
 curl -fsS http://localhost:8000/health
 ```
 
-生产建议通过同域反向代理暴露 Web 与 `/api`，设置 `WEB_ORIGIN=https://your-domain`、`PUBLIC_API_BASE_URL=https://your-domain`、`COOKIE_SECURE=true`。不要直接公开 MySQL、Redis 端口。上面的 yifanlab HTTP 配置是用户明确确认的临时例外。
+生产建议通过同域反向代理暴露 Web 与 `/api`，设置 `WEB_ORIGIN=https://your-domain`、`PUBLIC_API_BASE_URL=https://your-domain`、`COOKIE_SECURE=true`。不要直接公开 MySQL、Redis 端口。yifanlab 当前浏览器 API 已使用 HTTPS，HTTP 入口与 Cookie/Collector 的强制 HTTPS 收口仍待单独执行。
 
 ## 外部 MySQL
 

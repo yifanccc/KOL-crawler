@@ -239,6 +239,7 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - 生产 heartbeat 为 `healthy`，provider 状态为 Binance Copy `healthy`、Binance Square `healthy`、X `authenticated`，Outbox 为 0。首次基线没有生成 RawPost、Signal 或 NotificationEvent，也没有发送人工 ntfy 测试；后续只有真实仓位结构变化才会按单轮采集合并推送。
 - 容器内 OpenAI-compatible 实请求使用 `deepseek-v4-flash` 与 `chat_completions` 成功返回合法结构，HTTP/HTTPS proxy 均已注入，`used_fallback=false`。
 - 部署后磁盘剩余约 2.8 GB（使用率 93%）；未执行全局 Docker prune，以免删除其他项目缓存或本次回滚镜像。Web 构建仍报告 4 个 high severity npm 依赖项，本次没有做超出范围的破坏性升级。
+- 首次 HTTPS 人工登录暴露出生产 Web build arg 仍为 HTTP：浏览器在发送登录请求前按混合内容拦截，页面显示 `Failed to fetch`。修复后仅重建 Web，生产 bundle 包含 `https://www.yifanlab.cloud/kol` 且不再包含对应 HTTP 地址；HTTPS 登录页 200，畸形登录 POST 通过同一路由到达 API 并返回预期 422。API、数据库和 Collector 未重启，修复前 Compose 备份位于 `.runtime/deploy-backups/https-login-20260824225241`。
 
 ## 外部前置条件
 
