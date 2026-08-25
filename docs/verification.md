@@ -252,6 +252,18 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - 重建前后该订阅 RawPost 与 Signal 均保持 6 条；重建后新增 NotificationEvent 为 0。本地 Outbox 和死信均为 0，生产 heartbeat 为 `healthy`，Binance Copy/Binance Square 为 `healthy`、X 为 `authenticated`。
 - 生产磁盘剩余约 3.4 GB（使用率 92%），未运行全局 Docker prune。
 
+### Binance Copy 数量账本与手机推送生产部署
+
+2026-08-25 将显式空仓基线后的仓位运算固定为成交币数账本：开仓按 `executedQty` 增加，平仓按 `executedQty` 减少并最多扣到 0，成交金额不参与仓位数量。未设置空仓起算时间的订阅仍保留矛盾记录转 `UNKNOWN` 的保护。ntfy 同批成交改为按“开/平、空/多、币种”合并，平仓汇总 `totalPnl`，随后列出 KOL 的全部当前仓位。
+
+- 后端全量 `99 passed`，Collector 全量 `65 passed`；真实 47 笔本机账本离线重放后，ASTERUSDT 与 NEIROUSDT 均为 `FLAT / 0 / HIGH`。测试同时锁定无显式空仓基线时超额平仓仍为 `UNKNOWN`、操作快照使用相同基线语义、手机推送精确排版、两笔平仓的数量加权价格和已实现盈亏汇总。
+- 发布提交为 `b52c3d3`。发布前停止本机 Collector；本机 SQLite 备份位于 `.runtime/deploy-backups/quantity-ledger-20260825213434/collector.sqlite3`，线上数据库和源码备份位于 `/home/deploy/kol-crawler/.runtime/deploy-backups/quantity-ledger-20260825213434`。
+- 线上只重建并替换 API，Web、MySQL、Redis 与 Nginx 未重启；生产 `.env` 的 SHA-256 与发布前备份一致。API 健康检查和 HTTPS 登录页返回 200，未登录持仓页返回 307 到登录页。
+- 重启本机 Collector 后，本轮 Binance Copy 成功读取 47 条并上传仓位。生产现有 11 条仓位状态为 2 条 `ACTIVE`、9 条 `FLAT`、0 条 `UNKNOWN`；ASTERUSDT 与 NEIROUSDT 均为 `FLAT / 0 / HIGH`。对应操作仍保留原始成交币数，ASTERUSDT 最后一笔和 NEIROUSDT 平仓均为 `CLOSE`，没有生成反向空仓。
+- 生产仍有 47 条操作、6 条 RawPost、6 条 Signal；本机 Outbox 与死信均为 0，没有为历史基线生成新推送。Collector 心跳为 `healthy` 且 Outbox 为 0，Binance Copy/Binance Square 为 `healthy`、X 为 `authenticated`。
+- 容器内用真实 BTCUSDT、XAUUSDT 当前仓位只读渲染新消息：数量、均价、标记价、预计盈亏、按建仓名义金额计算的盈亏比例，以及按账户保证金余额计算的仓位倍数均有值。没有向真实 ntfy topic 发送测试通知；首次真实成交推送仍由下一次仓位变动触发。
+- 发布后生产磁盘剩余约 3.0 GB（使用率 93%），未运行全局 Docker prune。
+
 ## 外部前置条件
 
 - ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。
