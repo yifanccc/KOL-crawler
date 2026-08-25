@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -17,7 +18,9 @@ TARGET = ProviderTarget(21, "binance_copy", "5075281354358777856", "熬鹰资本
 FIXTURE = Path(__file__).parent / "fixtures/binance_copy_trade_records.json"
 
 
-def fixture_transport(payload: dict | None = None):
+def fixture_transport(
+    payload: dict | None = None, start_at: datetime | None = None
+):
     response_payload = payload or json.loads(FIXTURE.read_text())
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -27,7 +30,9 @@ def fixture_transport(payload: dict | None = None):
             assert request.method == "POST"
             assert json.loads(request.content) == {
                 "portfolioId": "5075281354358777856",
-                "startTime": int((NOW - timedelta(days=30)).timestamp() * 1000),
+                "startTime": int(
+                    (start_at or NOW - timedelta(days=30)).timestamp() * 1000
+                ),
                 "endTime": int(NOW.timestamp() * 1000),
                 "pageSize": 100,
             }
@@ -62,8 +67,10 @@ def fixture_transport(payload: dict | None = None):
     return httpx.MockTransport(handler)
 
 
-def provider_for(payload: dict | None = None) -> BinanceCopyProvider:
-    http = httpx.Client(transport=fixture_transport(payload))
+def provider_for(
+    payload: dict | None = None, start_at: datetime | None = None
+) -> BinanceCopyProvider:
+    http = httpx.Client(transport=fixture_transport(payload, start_at))
     return BinanceCopyProvider(http=http, now=lambda: NOW)
 
 
@@ -187,4 +194,53 @@ def test_binance_copy_provider_accepts_checkpoint_present_in_overlap_window() ->
     update = provider.fetch(TARGET, baseline.candidate_checkpoint, limit=5)
 
     assert update.candidate_checkpoint == baseline.candidate_checkpoint
+    assert provider.health().status == "healthy"
+
+
+def test_binance_copy_provider_uses_cutoff_filters_old_rows_and_marks_complete() -> None:
+    position_start_at = datetime(2026, 8, 9, 3, tzinfo=UTC)
+    payload = json.loads(FIXTURE.read_text())
+    payload["data"]["total"] = len(payload["data"]["list"])
+    provider = provider_for(payload, start_at=position_start_at)
+
+    result = provider.fetch(
+        replace(TARGET, position_start_at=position_start_at), None, limit=1
+    )
+
+    assert [record.event_time for record in result.records] == [
+        datetime(2026, 8, 9, 3, tzinfo=UTC),
+        datetime(2026, 8, 9, 4, tzinfo=UTC),
+    ]
+    assert result.history_complete is True
+    assert provider.health().status == "healthy"
+
+
+def test_binance_copy_provider_refuses_truncated_cutoff_history() -> None:
+    position_start_at = datetime(2026, 8, 8, tzinfo=UTC)
+    provider = provider_for(start_at=position_start_at)
+
+    with pytest.raises(TradeHistoryGap, match="exceeds one page"):
+        provider.fetch(
+            replace(TARGET, position_start_at=position_start_at), None, limit=1
+        )
+
+    assert provider.health().status == "access_limited"
+
+
+def test_binance_copy_provider_does_not_fetch_before_cutoff() -> None:
+    def unexpected(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    provider = BinanceCopyProvider(
+        http=httpx.Client(transport=httpx.MockTransport(unexpected)),
+        now=lambda: NOW,
+    )
+    result = provider.fetch(
+        replace(TARGET, position_start_at=NOW + timedelta(minutes=1)),
+        None,
+        limit=1,
+    )
+
+    assert result.records == []
+    assert result.history_complete is True
     assert provider.health().status == "healthy"

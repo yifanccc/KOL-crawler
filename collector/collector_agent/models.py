@@ -34,6 +34,7 @@ class ProviderTarget:
     platform: str
     account_id: str | None
     handle: str
+    position_start_at: datetime | None = None
 
 
 @dataclass(frozen=True)

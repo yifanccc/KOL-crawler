@@ -78,6 +78,7 @@ export interface AdminSubscription {
   platform: string;
   handle: string;
   accountId?: string | null;
+  positionStartAt?: string | null;
   visibility: "public" | "private";
   intervalMinutes: number;
   enabled: boolean;

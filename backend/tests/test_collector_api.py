@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 
 from app.db.base import Base
@@ -51,6 +53,7 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
                 "platform_account_id": "5075281354358777856",
                 "platform_handle": "熬鹰资本",
                 "visibility": "private",
+                "position_start_at": datetime(2026, 8, 18, 16, tzinfo=UTC),
                 "interval_minutes": 10,
                 "enabled": True,
             },
@@ -82,7 +85,15 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
     subscriptions = config.json()["subscriptions"]
     assert all(
         set(subscription)
-        == {"id", "platform", "handle", "accountId", "intervalMinutes", "enabled"}
+        == {
+            "id",
+            "platform",
+            "handle",
+            "accountId",
+            "positionStartAt",
+            "intervalMinutes",
+            "enabled",
+        }
         for subscription in subscriptions
     )
     trade_target = next(
@@ -91,10 +102,12 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
         if subscription["platform"] == "binance_copy"
     )
     assert trade_target["accountId"] == "5075281354358777856"
+    assert trade_target["positionStartAt"] == "2026-08-18T16:00:00+00:00"
     regular_target = next(
         subscription for subscription in subscriptions if subscription["platform"] == "x"
     )
     assert regular_target["accountId"] is None
+    assert regular_target["positionStartAt"] is None
     assert regular_target["intervalMinutes"] == 1
     assert regular_target["enabled"] is True
     assert first.status_code == 200

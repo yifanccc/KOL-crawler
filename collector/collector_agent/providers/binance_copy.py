@@ -62,9 +62,33 @@ class BinanceCopyProvider:
             self._health = ProviderHealth("failed", "Collector clock is not timezone-aware")
             return TradeRecordFetchResult([], checkpoint, history_complete=False)
         observed_at = observed_at.astimezone(UTC)
+        position_start_at = target.position_start_at
+        if position_start_at is not None:
+            if position_start_at.tzinfo is None:
+                self._health = ProviderHealth(
+                    "failed", "Binance Copy position start time is invalid"
+                )
+                return TradeRecordFetchResult([], checkpoint, history_complete=False)
+            position_start_at = position_start_at.astimezone(UTC)
+            if observed_at < position_start_at:
+                self._health = ProviderHealth("healthy")
+                return TradeRecordFetchResult(
+                    [], checkpoint, history_complete=True
+                )
+            if position_start_at < observed_at - timedelta(days=WINDOW_DAYS):
+                self._health = ProviderHealth(
+                    "access_limited",
+                    "Binance Copy position start time is outside the 30 day window",
+                )
+                raise TradeHistoryGap(
+                    "Binance Copy position start time is outside the 30 day window"
+                )
+        request_start_at = position_start_at or (
+            observed_at - timedelta(days=WINDOW_DAYS)
+        )
         request_payload = {
             "portfolioId": target.account_id,
-            "startTime": int((observed_at - timedelta(days=WINDOW_DAYS)).timestamp() * 1000),
+            "startTime": int(request_start_at.timestamp() * 1000),
             "endTime": int(observed_at.timestamp() * 1000),
             "pageSize": OVERLAP_RECORDS,
         }
@@ -91,10 +115,25 @@ class BinanceCopyProvider:
             return TradeRecordFetchResult([], checkpoint, history_complete=False)
 
         try:
-            records = self._normalize_response(payload, target, observed_at)
+            records, total = self._normalize_response(payload, target, observed_at)
         except (KeyError, TypeError, ValueError):
             self._health = ProviderHealth("schema_changed", "Binance Copy schema changed")
             return TradeRecordFetchResult([], checkpoint, history_complete=False)
+
+        if position_start_at is not None and total > len(records):
+            self._health = ProviderHealth(
+                "access_limited",
+                "Binance Copy history since position start exceeds one page",
+            )
+            raise TradeHistoryGap(
+                "Binance Copy history since position start exceeds one page"
+            )
+        if position_start_at is not None:
+            records = [
+                record
+                for record in records
+                if position_start_at <= record.event_time <= observed_at
+            ]
 
         if checkpoint is not None:
             checkpoint_record_id = TradeCheckpoint.decode(checkpoint).record_id
@@ -129,7 +168,7 @@ class BinanceCopyProvider:
         return TradeRecordFetchResult(
             records=records,
             candidate_checkpoint=candidate_checkpoint,
-            history_complete=False,
+            history_complete=position_start_at is not None,
             account_snapshot=account_snapshot,
             mark_prices=mark_prices,
         )
@@ -192,7 +231,7 @@ class BinanceCopyProvider:
         payload: dict[str, Any],
         target: ProviderTarget,
         observed_at: datetime,
-    ) -> list[NormalizedTradeRecord]:
+    ) -> tuple[list[NormalizedTradeRecord], int]:
         data = payload["data"]
         if not isinstance(data, dict):
             raise ValueError("data must be an object")
@@ -213,7 +252,7 @@ class BinanceCopyProvider:
                 record.revision,
             )
         )
-        return records
+        return records, total
 
     @staticmethod
     def _normalize_row(

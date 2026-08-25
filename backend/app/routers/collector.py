@@ -26,6 +26,12 @@ from app.models.subscription import TRADE_PLATFORMS
 router = APIRouter(prefix="/api/v1/collector", tags=["collector"])
 
 
+def _utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class ProviderHeartbeat(BaseModel):
     platform: str = Field(min_length=1, max_length=32)
     status: str = Field(min_length=1, max_length=32)
@@ -240,6 +246,9 @@ def collector_config(
                 "platform": row.platform,
                 "handle": row.platform_handle,
                 "accountId": row.platform_account_id,
+                "positionStartAt": _utc_datetime(row.position_start_at).isoformat()
+                if row.position_start_at
+                else None,
                 "intervalMinutes": row.interval_minutes,
                 "enabled": row.enabled,
             }
@@ -291,6 +300,13 @@ def collector_posts(
             subscription = db.get(Subscription, post.subscriptionId)
             if subscription is None or subscription.platform != post.platform:
                 raise ValueError("subscription/platform mismatch")
+            if (
+                subscription.position_start_at is not None
+                and post.publishedAt is not None
+                and _utc_datetime(post.publishedAt)
+                < _utc_datetime(subscription.position_start_at)
+            ):
+                raise ValueError("trade event is before positionStartAt")
         except (ValidationError, ValueError) as exc:
             items.append({"externalId": item.get("externalId") if isinstance(item, dict) else None, "status": "invalid", "reason": str(exc)})
             continue
@@ -338,6 +354,21 @@ def replace_subscription_positions(
         or subscription.platform not in TRADE_PLATFORMS
     ):
         raise HTTPException(status_code=404, detail="Trade subscription not found")
+
+    if subscription.position_start_at is not None:
+        position_start_at = _utc_datetime(subscription.position_start_at)
+        if any(
+            item.asOfEventTime is not None
+            and _utc_datetime(item.asOfEventTime) < position_start_at
+            for item in payload.positions
+        ) or any(
+            _utc_datetime(item.eventTime) < position_start_at
+            for item in (payload.operations or [])
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Position snapshot contains data before positionStartAt",
+            )
 
     db.execute(
         delete(PositionEstimate).where(

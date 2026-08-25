@@ -35,6 +35,7 @@ class Subscription(Base):
     kol_profile_id: Mapped[int | None] = mapped_column(ForeignKey("kol_profiles.id"))
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     platform_account_id: Mapped[str | None] = mapped_column(String(255))
+    position_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     visibility: Mapped[str] = mapped_column(
         String(16), nullable=False, default="public", server_default="public"
     )

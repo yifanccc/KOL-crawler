@@ -5,6 +5,7 @@ from sqlalchemy.engine import Engine
 MIGRATION_COLUMNS = {
     "subscriptions": {
         "platform_account_id": "VARCHAR(255) NULL",
+        "position_start_at": "DATETIME NULL",
         "visibility": "VARCHAR(16) NOT NULL DEFAULT 'public'",
         "system_prompt": "LONGTEXT NULL",
         "user_prompt": "LONGTEXT NULL",

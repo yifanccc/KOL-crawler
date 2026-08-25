@@ -29,6 +29,7 @@ def create_trade_subscription(client: TestClient, headers: dict[str, str]) -> in
             "platform": "binance_copy",
             "handle": "熬鹰资本",
             "accountId": "5075281354358777856",
+            "positionStartAt": "2026-08-12T00:00:00Z",
         },
     )
     assert response.status_code == 200
@@ -162,6 +163,74 @@ def test_positions_require_login_and_reject_invalid_or_non_trade_snapshots() -> 
     assert invalid.status_code == 422
     assert wrong_platform.status_code == 404
     assert unauthenticated.status_code == 401
+
+
+def test_position_upload_rejects_records_before_configured_start() -> None:
+    reset_database()
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        subscription_id = create_trade_subscription(client, headers)
+        response = client.put(
+            f"/api/v1/collector/subscriptions/{subscription_id}/positions",
+            headers=COLLECTOR_HEADERS,
+            json={
+                "agentId": "home-mac-01",
+                "positions": [
+                    {
+                        **position_payload(),
+                        "asOfEventTime": "2026-08-11T23:59:59Z",
+                    }
+                ],
+                "operations": [],
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Position snapshot contains data before positionStartAt"
+    )
+
+
+def test_changing_position_start_clears_server_position_ledger() -> None:
+    reset_database()
+    with TestClient(app) as client:
+        headers = auth_headers(client)
+        subscription_id = create_trade_subscription(client, headers)
+        upload = client.put(
+            f"/api/v1/collector/subscriptions/{subscription_id}/positions",
+            headers=COLLECTOR_HEADERS,
+            json={
+                "agentId": "home-mac-01",
+                "account": {
+                    "marginBalance": "137889.65",
+                    "updatedAt": "2026-08-12T15:08:00Z",
+                },
+                "positions": [valued_position_payload()],
+                "operations": [operation_payload("1", "OPEN", 1)],
+            },
+        )
+        changed = client.patch(
+            f"/api/admin/subscriptions/{subscription_id}",
+            headers=headers,
+            json={"positionStartAt": "2026-08-13T00:00:00+08:00"},
+        )
+        detail = client.get(
+            f"/api/position-kols/{subscription_id}", headers=headers
+        )
+        operations = client.get(
+            f"/api/position-kols/{subscription_id}/operations", headers=headers
+        )
+
+    assert upload.status_code == 200
+    assert changed.status_code == 200
+    assert changed.json()["item"]["positionStartAt"] == (
+        "2026-08-12T16:00:00+00:00"
+    )
+    assert changed.json()["item"]["checkpoint"] is None
+    assert detail.json()["item"]["positions"] == []
+    assert detail.json()["item"]["summary"]["marginBalance"] is None
+    assert operations.json()["items"] == []
+    assert operations.json()["total"] == 0
 
 
 def test_position_monitor_exposes_one_kol_summary_positions_and_paginated_operations() -> None:

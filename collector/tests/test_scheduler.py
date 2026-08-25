@@ -357,6 +357,85 @@ def test_scheduler_creates_trade_baseline_with_fixed_account_target(tmp_path, ca
     assert "status=baseline_created" in capsys.readouterr().out
 
 
+class CutoffTradeApi(TradeApi):
+    def __init__(self, position_start_at: str):
+        super().__init__()
+        self.position_start_at = position_start_at
+        self.uploaded_batches: list[list[dict]] = []
+
+    def fetch_config(self):
+        config = super().fetch_config()
+        config["subscriptions"][0]["positionStartAt"] = self.position_start_at
+        return config
+
+    def upload(self, agent_id, posts):
+        self.uploaded_batches.append(posts)
+        return super().upload(agent_id, posts)
+
+
+def test_scheduler_skips_trade_fetch_before_configured_cutoff(tmp_path, capsys):
+    provider = TradeProvider()
+    api = CutoffTradeApi("2026-08-09T01:00:00Z")
+    store = CollectorStore(tmp_path / "db.sqlite")
+    scheduler = CollectorScheduler(store, api, {"binance_copy": provider})
+    now = datetime(2026, 8, 9, tzinfo=UTC)
+
+    assert scheduler.run_once(now) == []
+
+    assert provider.targets == []
+    assert store.trade_start_for(21) == datetime(2026, 8, 9, 1, tzinfo=UTC)
+    assert store.trade_baseline_initialized_for(21) is False
+    assert scheduler.next_check[21] == datetime(2026, 8, 9, 1, tzinfo=UTC)
+    assert "reason=before_position_start" in capsys.readouterr().out
+
+
+def test_scheduler_cutoff_change_rebuilds_silent_baseline(tmp_path):
+    store = CollectorStore(tmp_path / "db.sqlite")
+    store.record_trade_fetch(
+        21,
+        ProviderTarget(21, "binance_copy", "5075281354358777856", "熬鹰资本"),
+        TradeRecordFetchResult(
+            [sample_record("1", "OPEN", "LONG", "0.10")],
+            checkpoint("1"),
+            history_complete=False,
+        ),
+    )
+    store.record_trade_fetch(
+        21,
+        ProviderTarget(21, "binance_copy", "5075281354358777856", "熬鹰资本"),
+        TradeRecordFetchResult(
+            [
+                sample_record("1", "OPEN", "LONG", "0.10"),
+                sample_record("2", "INCREASE", "LONG", "0.05"),
+            ],
+            checkpoint("2"),
+            history_complete=False,
+        ),
+    )
+    assert len(store.pending_posts()) == 1
+
+    position_start_at = datetime(2026, 8, 8, tzinfo=UTC)
+    api = CutoffTradeApi(position_start_at.isoformat())
+    provider = TradeProvider()
+    scheduler = CollectorScheduler(store, api, {"binance_copy": provider})
+
+    assert scheduler.run_once(datetime(2026, 8, 9, 3, tzinfo=UTC)) == [21]
+
+    assert provider.targets == [
+        ProviderTarget(
+            21,
+            "binance_copy",
+            "5075281354358777856",
+            "熬鹰资本",
+            position_start_at,
+        )
+    ]
+    assert store.checkpoint_for(21) == checkpoint("1")
+    assert len(store.trade_operation_snapshots_for(21)) == 1
+    assert store.pending_posts() == []
+    assert api.uploaded_batches == []
+
+
 class UnhealthyTradeProvider(TradeProvider):
     def fetch(self, target, current_checkpoint, limit):
         self.targets.append(target)

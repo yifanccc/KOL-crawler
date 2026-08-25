@@ -5,12 +5,22 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models import CrawlRun, KolProfile, ModelConfig, NotificationEvent, NotificationRule, Subscription
+from app.models import (
+    CrawlRun,
+    KolProfile,
+    ModelConfig,
+    NotificationEvent,
+    NotificationRule,
+    PositionAccountSnapshot,
+    PositionEstimate,
+    PositionOperation,
+    Subscription,
+)
 from app.models.subscription import DEFAULT_MONITOR_INTERVAL_MINUTES, TRADE_PLATFORMS
 from app.routers.auth import authenticate, require_authenticated, set_session_cookie
 from app.services.collector_health import collector_health_payload
@@ -53,6 +63,7 @@ class SubscriptionCreate(BaseModel):
     platform: str = Field(default="x", min_length=1, max_length=32)
     handle: str = Field(min_length=1, max_length=255)
     accountId: str | None = Field(default=None, pattern=r"^[0-9]{8,32}$")
+    positionStartAt: datetime | None = None
     intervalMinutes: int = Field(default=DEFAULT_MONITOR_INTERVAL_MINUTES, ge=1)
     prompt: str | None = None
     primaryMarket: str | None = None
@@ -88,6 +99,13 @@ class SubscriptionCreate(BaseModel):
                 raise ValueError("private trade platforms do not use prompts")
         elif self.accountId is not None:
             raise ValueError("accountId is only valid for private trade platforms")
+        if self.positionStartAt is not None:
+            if self.positionStartAt.tzinfo is None:
+                raise ValueError("positionStartAt must include a timezone")
+            if self.platform not in TRADE_PLATFORMS:
+                raise ValueError(
+                    "positionStartAt is only valid for private trade platforms"
+                )
         return self
 
     @field_validator("markets")
@@ -110,6 +128,7 @@ class SubscriptionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intervalMinutes: int | None = Field(default=None, ge=1)
+    positionStartAt: datetime | None = None
     prompt: str | None = None
     systemPrompt: str | None = None
     userPrompt: str | None = None
@@ -217,6 +236,9 @@ def _subscription_payload(db: Session, subscription: Subscription) -> dict:
         "platform": subscription.platform,
         "handle": subscription.platform_handle,
         "accountId": subscription.platform_account_id,
+        "positionStartAt": _utc_datetime(subscription.position_start_at).isoformat()
+        if subscription.position_start_at
+        else None,
         "visibility": subscription.visibility,
         "intervalMinutes": subscription.interval_minutes,
         "enabled": subscription.enabled,
@@ -244,6 +266,30 @@ def _subscription_payload(db: Session, subscription: Subscription) -> dict:
         if subscription.last_success_at
         else None,
     }
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _clear_position_ledger(db: Session, subscription_id: int) -> None:
+    db.execute(
+        delete(PositionEstimate).where(
+            PositionEstimate.subscription_id == subscription_id
+        )
+    )
+    db.execute(
+        delete(PositionOperation).where(
+            PositionOperation.subscription_id == subscription_id
+        )
+    )
+    db.execute(
+        delete(PositionAccountSnapshot).where(
+            PositionAccountSnapshot.subscription_id == subscription_id
+        )
+    )
 
 
 @router.post("/subscriptions")
@@ -294,6 +340,15 @@ def create_subscription(
     if existing is not None:
         existing.kol_profile_id = kol.id
         existing.platform_account_id = payload.accountId
+        if is_trade:
+            existing.position_start_at = (
+                payload.positionStartAt.astimezone(UTC)
+                if payload.positionStartAt is not None
+                else None
+            )
+            existing.checkpoint = None
+            existing.next_check_at = None
+            _clear_position_ledger(db, existing.id)
         existing.platform_handle = handle
         existing.visibility = (
             "private" if payload.platform in TRADE_PLATFORMS else "public"
@@ -330,6 +385,11 @@ def create_subscription(
         kol_profile_id=kol.id,
         platform=payload.platform,
         platform_account_id=payload.accountId,
+        position_start_at=(
+            payload.positionStartAt.astimezone(UTC)
+            if payload.positionStartAt is not None
+            else None
+        ),
         platform_handle=handle,
         visibility="private" if payload.platform in TRADE_PLATFORMS else "public",
         interval_minutes=payload.intervalMinutes,
@@ -386,6 +446,28 @@ def update_subscription(
         subscription.prompt_version = None
         subscription.model_config_id = None
         subscription.markets_json = json.dumps(["crypto"], ensure_ascii=False)
+        if "positionStartAt" in payload.model_fields_set:
+            if payload.positionStartAt is None or payload.positionStartAt.tzinfo is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="positionStartAt must include a timezone",
+                )
+            position_start_at = payload.positionStartAt.astimezone(UTC)
+            current_start_at = (
+                _utc_datetime(subscription.position_start_at)
+                if subscription.position_start_at is not None
+                else None
+            )
+            if current_start_at != position_start_at:
+                subscription.position_start_at = position_start_at
+                subscription.checkpoint = None
+                subscription.next_check_at = None
+                _clear_position_ledger(db, subscription.id)
+    elif "positionStartAt" in payload.model_fields_set:
+        raise HTTPException(
+            status_code=422,
+            detail="positionStartAt is only valid for private trade platforms",
+        )
     if payload.intervalMinutes is not None:
         if (
             subscription.platform in TRADE_PLATFORMS

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from collector_agent.db import CollectorStore
 from collector_agent.models import TRADE_PLATFORMS, ProviderTarget
@@ -55,17 +55,54 @@ class CollectorScheduler:
                 self.alerter.update(platform, status, now.timestamp())
         return statuses
 
+    @staticmethod
+    def _position_start_at(subscription: dict) -> datetime | None:
+        value = subscription.get("positionStartAt")
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("positionStartAt must be an ISO datetime")
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("positionStartAt must include a timezone")
+        return parsed.astimezone(UTC)
+
     def run_once(self, now) -> list[int]:
         config = self.api.fetch_config()
         self.subscriptions = config["subscriptions"]
         ran = []
         for subscription in self.subscriptions:
             subscription_id = subscription["id"]
+            position_start_at = None
+            if subscription["platform"] in TRADE_PLATFORMS:
+                try:
+                    position_start_at = self._position_start_at(subscription)
+                    if self.store.ensure_trade_start(
+                        subscription_id, position_start_at
+                    ):
+                        self.next_check.pop(subscription_id, None)
+                except (TypeError, ValueError):
+                    self.provider_failures[subscription["platform"]] = (
+                        "Invalid position start time"
+                    )
+                    self._log_subscription(
+                        now,
+                        subscription,
+                        "failed",
+                        error="InvalidPositionStartAt",
+                    )
+                    continue
             if not subscription["enabled"]:
                 self._log_subscription(now, subscription, "skipped", reason="disabled")
                 continue
             if subscription_id in self.active:
                 self._log_subscription(now, subscription, "skipped", reason="active")
+                continue
+            if position_start_at is not None and now < position_start_at:
+                self.next_check[subscription_id] = position_start_at
+                self._log_subscription(
+                    now, subscription, "skipped", reason="before_position_start"
+                )
                 continue
             if now < self.next_check.get(subscription_id, now):
                 self._log_subscription(now, subscription, "skipped", reason="not_due")
@@ -78,6 +115,10 @@ class CollectorScheduler:
             sync_trade_positions = False
             try:
                 checkpoint_before = self.store.checkpoint_for(subscription_id)
+                baseline_before = (
+                    subscription["platform"] in TRADE_PLATFORMS
+                    and not self.store.trade_baseline_initialized_for(subscription_id)
+                )
                 limit = (
                     self.initial_fetch_limit
                     if checkpoint_before is None
@@ -88,6 +129,7 @@ class CollectorScheduler:
                     platform=subscription["platform"],
                     account_id=subscription.get("accountId"),
                     handle=subscription["handle"],
+                    position_start_at=position_start_at,
                 )
                 result = provider.fetch(target, checkpoint_before, limit)
                 health = provider.health() if hasattr(provider, "health") else None
@@ -119,7 +161,7 @@ class CollectorScheduler:
                     self.store.record_trade_fetch(subscription_id, target, result)
                     sync_trade_positions = True
                     status = (
-                        "baseline_created" if checkpoint_before is None else "success"
+                        "baseline_created" if baseline_before else "success"
                     )
                 else:
                     raise ValueError("unknown provider result kind")

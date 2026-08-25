@@ -7,7 +7,11 @@ import pytest
 
 from collector_agent.db import CollectorStore
 from collector_agent.models import ProviderTarget
-from collector_agent.trade_models import TradeAccountSnapshot, TradeCheckpoint
+from collector_agent.trade_models import (
+    TradeAccountSnapshot,
+    TradeCheckpoint,
+    TradeRecordFetchResult,
+)
 from tests.trade_samples import sample_record, trade_result, trade_target
 
 
@@ -26,6 +30,70 @@ def test_first_trade_fetch_builds_baseline_without_outbox(tmp_path) -> None:
     position = store.position_for(7, "BTCUSDT", "LONG")
     assert position is not None
     assert position.quantity == Decimal("0.10")
+
+
+def test_empty_cutoff_baseline_makes_first_later_trade_notifiable(tmp_path) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    position_start_at = datetime(2026, 8, 8, tzinfo=UTC)
+    target = replace(trade_target(), position_start_at=position_start_at)
+
+    assert store.ensure_trade_start(7, position_start_at) is True
+    assert store.record_trade_fetch(
+        7,
+        target,
+        TradeRecordFetchResult([], None, history_complete=True),
+    ) == 0
+    assert store.trade_baseline_initialized_for(7) is True
+
+    assert store.record_trade_fetch(
+        7,
+        target,
+        trade_result([sample_record("1", "OPEN", "LONG", "0.10")], "1"),
+    ) == 1
+    assert len(store.pending_posts()) == 1
+
+
+def test_changing_cutoff_clears_local_trade_ledger_and_rejects_older_rows(
+    tmp_path,
+) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    first_start = datetime(2026, 8, 8, tzinfo=UTC)
+    first_target = replace(trade_target(), position_start_at=first_start)
+    store.ensure_trade_start(7, first_start)
+    store.record_trade_fetch(
+        7,
+        first_target,
+        trade_result([sample_record("1", "OPEN", "LONG", "0.10")], "1"),
+    )
+    store.record_trade_fetch(
+        7,
+        first_target,
+        trade_result(
+            [
+                sample_record("1", "OPEN", "LONG", "0.10"),
+                sample_record("2", "ADD", "LONG", "0.05"),
+            ],
+            "2",
+        ),
+    )
+
+    next_start = datetime(2026, 8, 9, 1, 2, tzinfo=UTC)
+    next_target = replace(trade_target(), position_start_at=next_start)
+    assert store.ensure_trade_start(7, next_start) is True
+    assert store.ensure_trade_start(7, next_start) is False
+    assert store.trade_start_for(7) == next_start
+    assert store.checkpoint_for(7) is None
+    assert store.pending_posts() == []
+    assert store.position_snapshots_for(7) == []
+    assert store.trade_operation_snapshots_for(7) == []
+    assert store.trade_baseline_initialized_for(7) is False
+
+    with pytest.raises(ValueError, match="before position start"):
+        store.record_trade_fetch(
+            7,
+            next_target,
+            trade_result([sample_record("1", "OPEN", "LONG", "0.10")], "1"),
+        )
 
 
 def test_trade_baseline_exposes_current_position_snapshots(tmp_path) -> None:

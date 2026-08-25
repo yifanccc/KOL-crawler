@@ -530,6 +530,7 @@ function normalizeAdminSubscription(value: unknown): AdminSubscription {
     platform: text(source.platform, "x"),
     handle: text(source.handle, "unknown"),
     accountId: text(source.accountId) || null,
+    positionStartAt: text(source.positionStartAt) || null,
     visibility: source.visibility === "private" ? "private" : "public",
     intervalMinutes: numberValue(source.intervalMinutes) ?? 10,
     enabled: source.enabled !== false,
@@ -587,9 +588,34 @@ export interface AdminSubscriptionInput {
 export interface BinanceCopySettingsInput {
   handle: string;
   accountId: string;
+  positionStartAt: string;
   enabled: boolean;
   ntfyServer: string;
   ntfyTopic: string;
+}
+
+export function beijingDateTimeToIso(value: string): string {
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
+    throw new Error("空仓起算时间格式无效");
+  }
+  const parsed = new Date(`${trimmed}:00+08:00`);
+  if (
+    Number.isNaN(parsed.getTime())
+    || isoToBeijingDateTimeLocal(parsed.toISOString()) !== trimmed
+  ) {
+    throw new Error("空仓起算时间无效");
+  }
+  return parsed.toISOString();
+}
+
+export function isoToBeijingDateTimeLocal(value?: string | null): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Date(parsed.getTime() + 8 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 16);
 }
 
 export function buildBinanceCopyCreatePayload(
@@ -599,6 +625,7 @@ export function buildBinanceCopyCreatePayload(
     platform: "binance_copy",
     handle: input.handle.trim(),
     accountId: input.accountId.trim(),
+    positionStartAt: beijingDateTimeToIso(input.positionStartAt),
     intervalMinutes: 10,
     markets: ["crypto"],
     ntfyServer: input.ntfyServer.trim(),
@@ -611,6 +638,7 @@ export function buildBinanceCopyUpdatePayload(
 ) {
   return {
     enabled: input.enabled,
+    positionStartAt: beijingDateTimeToIso(input.positionStartAt),
     ntfyServer: input.ntfyServer.trim(),
     ntfyTopic: input.ntfyTopic.trim(),
   };

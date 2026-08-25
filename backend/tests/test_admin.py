@@ -228,6 +228,16 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
                 "systemPrompt": "交易订阅不应配置模型",
             },
         )
+        invalid_start = client.post(
+            "/api/admin/subscriptions",
+            headers=headers,
+            json={
+                "platform": "binance_copy",
+                "handle": "无时区起算",
+                "accountId": "5075281354358777858",
+                "positionStartAt": "2026-08-19T00:00:00",
+            },
+        )
         created = client.post(
             "/api/admin/subscriptions",
             headers=headers,
@@ -235,6 +245,7 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
                 "platform": "binance_copy",
                 "handle": "熬鹰资本",
                 "accountId": "5075281354358777856",
+                "positionStartAt": "2026-08-19T00:00:00+08:00",
             },
         )
         duplicate = client.post(
@@ -276,7 +287,9 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
     assert invalid_account.status_code == 422
     assert invalid_interval.status_code == 422
     assert invalid_prompt.status_code == 422
+    assert invalid_start.status_code == 422
     assert item["accountId"] == "5075281354358777856"
+    assert item["positionStartAt"] == "2026-08-18T16:00:00+00:00"
     assert item["visibility"] == "private"
     assert item["intervalMinutes"] == 10
     assert item["systemPrompt"] is None

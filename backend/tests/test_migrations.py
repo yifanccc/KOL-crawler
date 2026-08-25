@@ -30,7 +30,11 @@ RAW_POST_ANALYSIS_COLUMNS = {
 }
 
 SUBSCRIPTION_LIFECYCLE_COLUMNS = {"deleted_at"}
-SUBSCRIPTION_TRADE_COLUMNS = {"platform_account_id", "visibility"}
+SUBSCRIPTION_TRADE_COLUMNS = {
+    "platform_account_id",
+    "position_start_at",
+    "visibility",
+}
 KOL_IDENTITY_COLUMNS = {"platform"}
 
 

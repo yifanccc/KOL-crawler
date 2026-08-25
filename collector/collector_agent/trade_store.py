@@ -274,11 +274,21 @@ def _validate_fetch(
 ) -> None:
     if target.subscription_id != subscription_id or target.account_id is None:
         raise ValueError("trade target does not match subscription")
+    position_start_at = target.position_start_at
+    if position_start_at is not None:
+        if position_start_at.tzinfo is None:
+            raise ValueError("position start time must be timezone-aware")
+        position_start_at = position_start_at.astimezone(UTC)
     for record in result.records:
         if record.platform != target.platform or record.account_id != target.account_id:
             raise ValueError("trade target does not match normalized record")
         if not record.source_record_id or not record.revision:
             raise ValueError("trade record identity is required")
+        if (
+            position_start_at is not None
+            and record.event_time.astimezone(UTC) < position_start_at
+        ):
+            raise ValueError("trade record is before position start time")
     if result.candidate_checkpoint is not None:
         candidate_order = _checkpoint_order(result.candidate_checkpoint)
         if checkpoint_before is not None and candidate_order < _checkpoint_order(
@@ -295,11 +305,15 @@ def record_trade_fetch(
 ) -> int:
     with connection:
         checkpoint_row = connection.execute(
-            "SELECT checkpoint FROM subscription_state WHERE subscription_id = ?",
+            "SELECT checkpoint, trade_baseline_initialized FROM subscription_state "
+            "WHERE subscription_id = ?",
             (subscription_id,),
         ).fetchone()
         checkpoint_before = checkpoint_row["checkpoint"] if checkpoint_row else None
-        baseline = checkpoint_before is None
+        baseline = (
+            checkpoint_row is None
+            or checkpoint_row["trade_baseline_initialized"] == 0
+        )
         _validate_fetch(subscription_id, target, result, checkpoint_before)
 
         inserted_keys: set[tuple[str, str]] = set()
@@ -491,9 +505,19 @@ def record_trade_fetch(
 
         if result.candidate_checkpoint is not None:
             connection.execute(
-                "INSERT INTO subscription_state (subscription_id, checkpoint) VALUES (?, ?) "
-                "ON CONFLICT(subscription_id) DO UPDATE SET checkpoint = excluded.checkpoint",
+                "INSERT INTO subscription_state "
+                "(subscription_id, checkpoint, trade_baseline_initialized) "
+                "VALUES (?, ?, 1) ON CONFLICT(subscription_id) DO UPDATE SET "
+                "checkpoint = excluded.checkpoint, trade_baseline_initialized = 1",
                 (subscription_id, result.candidate_checkpoint),
+            )
+        else:
+            connection.execute(
+                "INSERT INTO subscription_state "
+                "(subscription_id, trade_baseline_initialized) VALUES (?, 1) "
+                "ON CONFLICT(subscription_id) DO UPDATE SET "
+                "trade_baseline_initialized = 1",
+                (subscription_id,),
             )
         return inserted_outbox
 

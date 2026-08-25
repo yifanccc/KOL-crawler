@@ -22,6 +22,7 @@ import {
   deleteAdminSubscription,
   fetchAdminConfigOptions,
   fetchAdminSubscriptions,
+  isoToBeijingDateTimeLocal,
   updateAdminSubscription,
   updateBinanceCopySubscription,
 } from "@/lib/api";
@@ -47,6 +48,7 @@ interface SubscriptionForm {
   platform: string;
   handle: string;
   accountId: string;
+  positionStartAt: string;
   intervalMinutes: string;
   markets: string[];
   systemPrompt: string;
@@ -63,6 +65,7 @@ function newForm(options: AdminConfigOptions): SubscriptionForm {
     platform: platforms.includes("x") ? "x" : platforms[0] || "x",
     handle: "",
     accountId: "",
+    positionStartAt: "",
     intervalMinutes: String(options.defaultIntervalMinutes),
     markets: [...options.markets],
     systemPrompt: options.defaultSystemPrompt,
@@ -79,6 +82,7 @@ function subscriptionForm(subscription: AdminSubscription): SubscriptionForm {
     platform: subscription.platform,
     handle: subscription.handle,
     accountId: subscription.accountId || "",
+    positionStartAt: isoToBeijingDateTimeLocal(subscription.positionStartAt),
     intervalMinutes: String(subscription.intervalMinutes),
     markets: subscription.markets,
     systemPrompt: subscription.systemPrompt || subscription.effectiveSystemPrompt,
@@ -182,9 +186,11 @@ export function AdminShell({
       let saved: AdminSubscription;
       if (requiresAccountId(form.platform)) {
         if (!form.accountId.trim()) throw new Error("Portfolio ID 不能为空");
+        if (!form.positionStartAt) throw new Error("空仓起算时间不能为空");
         const tradeInput = {
           handle: form.handle,
           accountId: form.accountId,
+          positionStartAt: form.positionStartAt,
           enabled: form.enabled,
           ntfyServer: form.ntfyServer,
           ntfyTopic: form.ntfyTopic,
@@ -326,12 +332,16 @@ export function AdminShell({
                   ...form,
                   platform,
                   accountId: requiresAccountId(platform) ? form.accountId : "",
+                  positionStartAt: requiresAccountId(platform)
+                    ? form.positionStartAt
+                    : "",
                   intervalMinutes: requiresAccountId(platform) ? "10" : form.intervalMinutes,
                   markets: requiresAccountId(platform) ? ["crypto"] : form.markets,
                 });
               }}>{configurablePlatforms(options.platforms).map((platform) => <option key={platform} value={platform}>{platformLabel(platform)}</option>)}</select></label>
               <label><span>{isTrade ? "KOL 名称" : "KOL handle"}</span><input disabled={Boolean(selectedId)} required value={form.handle} onChange={(event) => setForm({ ...form, handle: event.target.value })} placeholder={isTrade ? "熬鹰资本" : "senerity"} /></label>
               {isTrade ? <label><span>Portfolio ID</span><input disabled={Boolean(selectedId)} inputMode="numeric" pattern="[0-9]{8,32}" required value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })} placeholder="5075281354358777856" /></label> : null}
+              {isTrade ? <label><span>空仓起算时间（北京时间）</span><input required step="60" type="datetime-local" value={form.positionStartAt} onChange={(event) => setForm({ ...form, positionStartAt: event.target.value })} /></label> : null}
               <label><span>抓取间隔（分钟）</span><input disabled={isTrade} min="1" type="number" value={form.intervalMinutes} onChange={(event) => setForm({ ...form, intervalMinutes: event.target.value })} /></label>
               <label className="settings-toggle"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /><span>启用监控</span></label>
             </div>
@@ -346,7 +356,7 @@ export function AdminShell({
                 </div>
               </>
             ) : (
-              <div className="trade-config-summary"><Database size={18} aria-hidden="true" /><div><strong>Binance Copy 使用固定交易账本</strong><span>每 10 分钟读取成交记录、组合保证金与标记价格，不调用模型，也不需要 Prompt。</span></div></div>
+              <div className="trade-config-summary"><Database size={18} aria-hidden="true" /><div><strong>Binance Copy 使用固定交易账本</strong><span>起算时间视为空仓，只使用此后的成交记录推算仓位。修改时间会重置已推算的仓位与操作记录；首次重建不推送 ntfy。</span></div></div>
             )}
 
             <div className="settings-basic-grid settings-notify-grid">

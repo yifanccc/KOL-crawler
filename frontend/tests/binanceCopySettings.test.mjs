@@ -18,6 +18,7 @@ test("Binance Copy create payload has no model or prompt fields", () => {
   const payload = api.buildBinanceCopyCreatePayload({
     handle: "熬鹰资本",
     accountId: "5075281354358777856",
+    positionStartAt: "2026-08-19T00:00",
     enabled: true,
     ntfyServer: "https://ntfy.sh",
     ntfyTopic: "kol-copy",
@@ -27,6 +28,7 @@ test("Binance Copy create payload has no model or prompt fields", () => {
     platform: "binance_copy",
     handle: "熬鹰资本",
     accountId: "5075281354358777856",
+    positionStartAt: "2026-08-18T16:00:00.000Z",
     intervalMinutes: 10,
     markets: ["crypto"],
     ntfyServer: "https://ntfy.sh",
@@ -42,10 +44,27 @@ test("Binance Copy update payload only contains mutable controls", () => {
     api.buildBinanceCopyUpdatePayload({
       handle: "ignored identity",
       accountId: "5075281354358777856",
+      positionStartAt: "2026-08-19T00:00",
       enabled: false,
       ntfyServer: "",
       ntfyTopic: "",
     }),
-    { enabled: false, ntfyServer: "", ntfyTopic: "" },
+    {
+      enabled: false,
+      positionStartAt: "2026-08-18T16:00:00.000Z",
+      ntfyServer: "",
+      ntfyTopic: "",
+    },
+  );
+});
+
+test("Binance Copy start time is interpreted as Beijing time", () => {
+  assert.equal(
+    api.beijingDateTimeToIso("2026-08-19T00:00"),
+    "2026-08-18T16:00:00.000Z",
+  );
+  assert.equal(
+    api.isoToBeijingDateTimeLocal("2026-08-18T16:00:00Z"),
+    "2026-08-19T00:00",
   );
 });
