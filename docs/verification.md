@@ -248,7 +248,7 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - 后端全量 `98 passed`，Collector 全量 `64 passed`，前端 Node `25 passed`；TypeScript `--noEmit` 与 Next.js 生产构建通过。测试覆盖起算前拒绝、修改起算点双端清账、空首轮基线、首笔后续交易通知以及超过 100 条时拒绝不完整重建。
 - 生产只重建并替换 API、Web；MySQL、Redis、Nginx 和 `.env` 未改写或重启。迁移新增 `subscriptions.position_start_at`，HTTPS 登录页返回 200，未登录持仓页仍 307 到登录页，新设置文案存在于生产静态 bundle。
 - 修改配置前线上有 14 条仓位状态、106 条操作和 1 条账户快照。配置更新通过管理 API 完成，服务端先清空这三类推算数据；本地 Collector 随后清空旧的 106 笔账本，以 `baseline_created fetched=47` 静默重建。重建后的首笔操作时间为 UTC `2026-08-19 06:47:01`，没有起算点之前的数据。
-- 当前账本含 47 条操作、11 条仓位状态，其中 7 条已平仓、2 条可推算的活跃空仓、2 条 `UNKNOWN`。BTCUSDT 与 XAUUSDT 空仓可正常推算；ASTERUSDT 与 NEIROUSDT 起算后的第一条记录就是减仓，与“起算时为空仓”的假设冲突，因此系统没有补造数量或成本，KOL 汇总保持 `PARTIAL`。
+- 当时账本含 47 条操作、11 条仓位状态，其中 7 条已平仓、2 条可推算的活跃空仓、2 条 `UNKNOWN`。BTCUSDT 与 XAUUSDT 空仓可正常推算；ASTERUSDT 和 NEIROUSDT 的首笔都是开多，但起算后累计平多币数分别超过累计开多币数 42,101 ASTER 和 284,298,174 NEIRO，旧规则因此将最终状态降为 `UNKNOWN`，KOL 汇总保持 `PARTIAL`。
 - 重建前后该订阅 RawPost 与 Signal 均保持 6 条；重建后新增 NotificationEvent 为 0。本地 Outbox 和死信均为 0，生产 heartbeat 为 `healthy`，Binance Copy/Binance Square 为 `healthy`、X 为 `authenticated`。
 - 生产磁盘剩余约 3.4 GB（使用率 92%），未运行全局 Docker prune。
 

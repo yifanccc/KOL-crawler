@@ -143,7 +143,11 @@ def _apply_record(
     elif record.operation in {"REDUCE", "DECREASE"}:
         action = "REDUCE"
         if current is None or current.status != "ACTIVE":
-            position = _unknown_position(record)
+            if history_complete:
+                position = _flat_position(record, history_complete)
+                action = "CLOSE"
+            else:
+                position = _unknown_position(record)
         elif current.quantity is None or record.quantity is None:
             position = _active_position(
                 record,
@@ -153,7 +157,11 @@ def _apply_record(
                 current.leverage,
             )
         elif record.quantity > current.quantity:
-            position = _unknown_position(record)
+            if history_complete:
+                position = _flat_position(record, history_complete)
+                action = "CLOSE"
+            else:
+                position = _unknown_position(record)
         elif record.quantity == current.quantity:
             position = _flat_position(record, history_complete)
             action = "CLOSE"

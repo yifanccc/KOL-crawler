@@ -145,4 +145,6 @@ Dashboard 的 Collector 状态来自最近一次 heartbeat；心跳陈旧时先�
 
 中文标题和正文使用 ntfy JSON 发布，避免把非 ASCII 文本放入 HTTP Header。
 
-Binance Copy 交易通知按“单次订阅采集”聚合：后端先等待 `collectionBatchSize` 笔交易全部生成 Signal，再发送一条 `Binance Copy | <KOL> | 仓位变动 <N> 笔`。正文按品种和持仓方向展示仓位前后值、变化量、推测开仓均价、成交笔数/数量/均价/金额汇总、该品种当前仓位和 KOL 当前核心汇总。`positionChanges` 为空时不创建通知事件；仅 mark price、预计盈亏或保证金余额刷新时 Collector 不创建交易 Outbox，因此也不会推送。若后端当前仓位与批次最终状态不一致，通知会省略可能过期的现价、盈亏和 KOL 汇总，并明确提示快照尚未同步。
+Binance Copy 交易通知按“单次订阅采集”聚合：后端先等待 `collectionBatchSize` 笔交易全部生成 Signal，再发送一条 `<KOL>｜仓位变动 <N>笔`。正文先显示 KOL 和北京时间，再按“开/平、空/多、币种”合并同批成交数量和数量加权成交价；平仓额外汇总来源 `totalPnl`。随后列出该 KOL 的全部当前仓位，包括币数、数量加权建仓均价、标记价、预计盈亏、预计盈亏除以建仓名义金额的比例，以及该仓位名义金额除以账户保证金余额的倍数。这里的“杠杆”是用户指定的金额/保证金口径，不是 Binance 未提供的合约设置杠杆。
+
+`positionChanges` 为空时不创建通知事件；仅 mark price、预计盈亏或保证金余额刷新时 Collector 不创建交易 Outbox，因此也不会推送。若后端当前仓位与批次最终状态不一致，通知只显示操作并提示持仓快照同步中，不拼接可能过期的当前持仓。

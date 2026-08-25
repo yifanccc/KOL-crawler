@@ -1,7 +1,6 @@
 import json
-from collections import Counter
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -21,8 +20,7 @@ from app.models import (
     SignalAsset,
     Subscription,
 )
-from app.services.position_monitor import position_summary_payload
-from app.services.trade_structurer import PositionAfter, PositionChange, TradePayload
+from app.services.trade_structurer import PositionAfter, TradePayload
 
 CONFIDENCE_RANK = {"低": 1, "中": 2, "高": 3, None: 0}
 PLATFORM_LABELS = {
@@ -96,28 +94,26 @@ def _asset_markets(session: Session, signal: Signal) -> list[str]:
 
 def _money(value: Decimal | str | None, *, signed: bool = False) -> str:
     if value is None:
-        return "数据源未提供"
+        return "—"
     decimal_value = value if isinstance(value, Decimal) else Decimal(value)
     sign = "+" if signed and decimal_value > 0 else ""
     return f"{sign}{decimal_value:,.2f} USDT"
 
 
-def _number(value: Decimal | str | None, decimals: int = 2) -> str:
+def _price(value: Decimal | str | None) -> str:
     if value is None:
-        return "数据源未提供"
+        return "—"
     decimal_value = value if isinstance(value, Decimal) else Decimal(value)
-    return f"{decimal_value:,.{decimals}f}"
+    absolute = abs(decimal_value)
+    decimals = 2 if absolute >= 100 else 4 if absolute >= 1 else 8
+    return f"{decimal_value:,.{decimals}f}".rstrip("0").rstrip(".")
 
 
 def _quantity(value: Decimal | str | None) -> str:
     if value is None:
-        return "数据源未提供"
+        return "—"
     decimal_value = value if isinstance(value, Decimal) else Decimal(value)
     return format(decimal_value.normalize(), "f")
-
-
-def _leverage(value: Decimal | str | None) -> str:
-    return f"{_quantity(value)}x" if value is not None else "数据源未提供"
 
 
 def _account_multiple(
@@ -125,7 +121,7 @@ def _account_multiple(
     margin_balance: Decimal | str | None,
 ) -> str:
     if total_notional is None or margin_balance is None:
-        return "暂不可估算"
+        return "—"
     notional_value = (
         total_notional if isinstance(total_notional, Decimal) else Decimal(total_notional)
     )
@@ -133,38 +129,180 @@ def _account_multiple(
         margin_balance if isinstance(margin_balance, Decimal) else Decimal(margin_balance)
     )
     if margin_value <= 0:
-        return "暂不可估算"
+        return "—"
     return f"{notional_value / margin_value:,.2f}x"
 
 
-def _position_state(state: PositionAfter) -> str:
-    side_labels = {
-        "LONG": "多",
-        "SHORT": "空",
-        "FLAT": "空仓",
-        "UNKNOWN": "未知",
-    }
-    label = side_labels[state.side]
-    if state.side == "FLAT":
-        return label
-    return f"{label} {_quantity(state.quantity)}"
+def _decimal_or_none(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return parsed if parsed.is_finite() else None
 
 
-def _position_delta(change: PositionChange) -> str:
-    if change.before.quantity is None or change.after.quantity is None:
-        return ""
-    delta = change.after.quantity - change.before.quantity
-    if delta == 0:
-        return ""
-    sign = "+" if delta > 0 else ""
-    return f"（{sign}{_quantity(delta)}）"
+def _percentage(value: Decimal | None) -> str:
+    if value is None:
+        return "—"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:,.2f}%"
 
 
 def _batch_time_text(trades: list[TradePayload]) -> str:
     times = sorted(trade.event_time.astimezone(SHANGHAI) for trade in trades)
     first = times[0].strftime("%Y-%m-%d %H:%M:%S")
     last = times[-1].strftime("%Y-%m-%d %H:%M:%S")
-    return first if first == last else f"{first} 至 {last}"
+    if first == last:
+        return first
+    if times[0].date() == times[-1].date():
+        return f"{first}–{times[-1].strftime('%H:%M:%S')}"
+    return f"{first}–{last}"
+
+
+def _operation_kind(trade: TradePayload) -> str:
+    if trade.effective_action in {"INCREASE", "OPEN", "ADD"}:
+        return "开"
+    if trade.effective_action in {"DECREASE", "REDUCE", "CLOSE"}:
+        return "平"
+    return "反手"
+
+
+def _trade_totals(
+    trades: list[TradePayload],
+) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+    if any(trade.quantity is None or trade.price is None for trade in trades):
+        return None, None, None
+    total_quantity = sum(
+        (trade.quantity for trade in trades if trade.quantity is not None),
+        Decimal("0"),
+    )
+    total_amount = sum(
+        (
+            trade.quantity * trade.price
+            for trade in trades
+            if trade.quantity is not None and trade.price is not None
+        ),
+        Decimal("0"),
+    )
+    average_price = total_amount / total_quantity if total_quantity > 0 else None
+    return total_quantity, average_price, total_amount
+
+
+def _realized_pnl(trades: list[TradePayload]) -> Decimal | None:
+    values = [_decimal_or_none(trade.source_record.get("totalPnl")) for trade in trades]
+    if any(value is None for value in values):
+        return None
+    return sum((value for value in values if value is not None), Decimal("0"))
+
+
+def _operation_lines(
+    trades: list[TradePayload],
+    margin_balance: Decimal | str | None,
+) -> list[str]:
+    side_labels = {"LONG": "多", "SHORT": "空", "UNKNOWN": "未知"}
+    grouped: dict[tuple[str, str, str], list[TradePayload]] = {}
+    for trade in sorted(
+        trades,
+        key=lambda item: (item.event_time, item.source_record_id, item.revision),
+    ):
+        key = (_operation_kind(trade), trade.position_side, trade.symbol)
+        grouped.setdefault(key, []).append(trade)
+
+    lines = [f"操作（{len(trades)}笔）"]
+    for (kind, position_side, symbol), group in grouped.items():
+        quantity, average_price, amount = _trade_totals(group)
+        count = f"｜{len(group)}笔" if len(group) > 1 else ""
+        price_label = "建仓价" if kind == "开" else "平仓价"
+        lines.extend(
+            [
+                f"{kind} {side_labels[position_side]} {symbol}{count}",
+                f"数量 {_quantity(quantity)}｜{price_label} {_price(average_price)}",
+            ]
+        )
+        multiple = _account_multiple(amount, margin_balance)
+        if kind == "平":
+            lines.append(
+                f"杠杆 {multiple}｜盈亏 {_money(_realized_pnl(group), signed=True)}"
+            )
+        else:
+            lines.append(f"杠杆 {multiple}")
+    return lines
+
+
+def _position_pnl_ratio(position: PositionEstimate) -> Decimal | None:
+    quantity = _decimal_or_none(position.quantity)
+    entry_price = _decimal_or_none(position.entry_price)
+    estimated_pnl = _decimal_or_none(position.estimated_pnl)
+    if quantity is None or entry_price is None or estimated_pnl is None:
+        return None
+    entry_notional = abs(quantity * entry_price)
+    if entry_notional <= 0:
+        return None
+    return estimated_pnl / entry_notional * Decimal("100")
+
+
+def _position_lines(
+    positions: list[PositionEstimate],
+    margin_balance: Decimal | str | None,
+) -> list[str]:
+    side_labels = {
+        "LONG": "多",
+        "SHORT": "空",
+        "UNKNOWN": "待确认",
+    }
+    current = sorted(
+        (position for position in positions if position.status != "FLAT"),
+        key=lambda position: (position.symbol, position.position_side),
+    )
+    lines = [f"持仓（{len(current)}）"]
+    if not current:
+        return ["持仓", "空仓"]
+    for index, position in enumerate(current):
+        if index:
+            lines.append("")
+        stale = "｜数据陈旧" if position.status == "STALE" else ""
+        lines.extend(
+            [
+                (
+                    f"{position.symbol} {side_labels.get(position.side, '待确认')}"
+                    f"｜数量 {_quantity(position.quantity)}{stale}"
+                ),
+                (
+                    f"均价 {_price(position.entry_price)}｜"
+                    f"标记价 {_price(position.mark_price)}"
+                ),
+                (
+                    f"盈亏 {_money(position.estimated_pnl, signed=True)}"
+                    f"（{_percentage(_position_pnl_ratio(position))}）｜"
+                    f"杠杆 {_account_multiple(position.notional, margin_balance)}"
+                ),
+            ]
+        )
+    return lines
+
+
+def _mobile_trade_message(
+    kol_name: str,
+    trades: list[TradePayload],
+    positions: list[PositionEstimate],
+    margin_balance: Decimal | str | None,
+    *,
+    snapshot_is_current: bool,
+) -> str:
+    lines = [
+        f"谁：{kol_name}",
+        f"时间：{_batch_time_text(trades)}",
+        "",
+        *_operation_lines(trades, margin_balance),
+        "",
+    ]
+    if snapshot_is_current:
+        lines.extend(_position_lines(positions, margin_balance))
+    else:
+        lines.extend(["持仓", "快照同步中，以本次操作为准"])
+    return "\n".join(lines)
 
 
 def _snapshot_matches(position: PositionEstimate | None, state: PositionAfter) -> bool:
@@ -228,110 +366,15 @@ def _trade_batch_notification(
         for change in reference_changes
     )
     account = session.get(PositionAccountSnapshot, subscription.id)
-    summary = position_summary_payload(subscription, kol, account, positions)
-    action_labels = {
-        "OPEN": "开仓",
-        "ADD": "加仓",
-        "REDUCE": "减仓",
-        "CLOSE": "平仓",
-        "REVERSE": "反手",
-        "CORRECTION": "交易修订",
-    }
-    side_labels = {"LONG": "多", "SHORT": "空", "UNKNOWN": "未知"}
-    trades_by_key: dict[tuple[str, str], list[TradePayload]] = {}
-    for trade in trades:
-        trades_by_key.setdefault((trade.symbol, trade.position_side), []).append(trade)
-
-    lines = [f"变动时间：{_batch_time_text(trades)}｜共 {len(trades)} 笔成交"]
-    for change in reference_changes:
-        key = (change.symbol, change.position_side)
-        grouped_trades = trades_by_key.get(key, [])
-        current = positions_by_key.get(key) if snapshot_is_current else None
-        lines.extend(
-            [
-                "",
-                f"{change.symbol} {side_labels[change.position_side]}",
-                (
-                    f"仓位：{_position_state(change.before)} → "
-                    f"{_position_state(change.after)}{_position_delta(change)}"
-                ),
-                (
-                    f"推测开仓均价：{_number(change.before.entry_price)} → "
-                    f"{_number(change.after.entry_price)}"
-                ),
-            ]
-        )
-        if grouped_trades:
-            action_counts = Counter(action_labels[trade.action] for trade in grouped_trades)
-            action_text = "、".join(
-                f"{action} {count} 笔" for action, count in action_counts.items()
-            )
-            quantities = [trade.quantity for trade in grouped_trades]
-            total_quantity = (
-                sum(quantities, Decimal("0"))
-                if all(quantity is not None for quantity in quantities)
-                else None
-            )
-            amounts = [
-                trade.quantity * trade.price
-                if trade.quantity is not None and trade.price is not None
-                else None
-                for trade in grouped_trades
-            ]
-            total_amount = (
-                sum(amounts, Decimal("0"))
-                if all(amount is not None for amount in amounts)
-                else None
-            )
-            average_price = (
-                total_amount / total_quantity
-                if total_amount is not None
-                and total_quantity is not None
-                and total_quantity > 0
-                else None
-            )
-            lines.append(f"操作汇总：{action_text}")
-            lines.append(
-                f"成交数量合计 {_quantity(total_quantity)}｜"
-                f"成交均价 {_number(average_price)}｜成交额合计 {_money(total_amount)}"
-            )
-        else:
-            lines.append("操作汇总：由反手操作联动关闭")
-
-        current_state = (
-            f"{side_labels.get(current.side, current.side)} {_quantity(current.quantity)}"
-            if current is not None
-            else _position_state(change.after)
-        )
-        current_entry = current.entry_price if current is not None else change.after.entry_price
-        current_leverage = current.leverage if current is not None else change.after.leverage
-        lines.append(
-            f"当前：{current_state}｜开仓 {_number(current_entry)}｜"
-            f"现价 {_number(current.mark_price if current else None)}"
-        )
-        lines.append(
-            f"持仓金额 {_money(current.notional if current else None)}｜"
-            f"杠杆 {_leverage(current_leverage)}｜"
-            f"预计盈亏 {_money(current.estimated_pnl if current else None, signed=True)}"
-        )
-
-    if snapshot_is_current:
-        lines.extend(
-            [
-                "",
-                f"KOL 当前：保证金余额 {_money(summary['marginBalance'])}",
-                (
-                    f"持仓总额（估算） {_money(summary['totalPositionNotional'])}｜"
-                    f"仓位倍数（估算） "
-                    f"{_account_multiple(summary['totalPositionNotional'], summary['marginBalance'])}｜"
-                    f"预计盈亏 {_money(summary['estimatedPnl'], signed=True)}"
-                ),
-            ]
-        )
-    else:
-        lines.extend(["", "KOL 当前：仓位快照尚未同步，本批变动以交易账本为准"])
-    title = f"Binance Copy | {kol.display_name} | 仓位变动 {len(trades)} 笔"
-    return title, "\n".join(lines)
+    margin_balance = account.margin_balance if account is not None else None
+    title = f"{kol.display_name}｜仓位变动 {len(trades)}笔"
+    return title, _mobile_trade_message(
+        kol.display_name,
+        trades,
+        positions,
+        margin_balance,
+        snapshot_is_current=snapshot_is_current,
+    )
 
 
 def _ready_trade_batch(
@@ -412,7 +455,6 @@ def _trade_notification(
         ).all()
     )
     account = session.get(PositionAccountSnapshot, subscription.id)
-    summary = position_summary_payload(subscription, kol, account, positions)
     current = next(
         (
             position
@@ -422,62 +464,12 @@ def _trade_notification(
         ),
         None,
     )
-    action_labels = {
-        "OPEN": "开仓",
-        "ADD": "加仓",
-        "REDUCE": "减仓",
-        "CLOSE": "平仓",
-        "REVERSE": "反手",
-        "CORRECTION": "交易修订",
-    }
-    side_labels = {
-        "LONG": "多",
-        "SHORT": "空",
-        "FLAT": "空仓",
-        "UNKNOWN": "未知",
-    }
-    amount = (
-        trade.quantity * trade.price
-        if trade.quantity is not None and trade.price is not None
-        else None
-    )
-    current_side = (
-        side_labels.get(current.side, current.side)
-        if current is not None
-        else side_labels.get(trade.position_after.side, trade.position_after.side)
-    )
-    current_quantity = (
-        current.quantity if current is not None else trade.position_after.quantity
-    )
-    entry_price = (
-        current.entry_price if current is not None else trade.position_after.entry_price
-    )
-    account_multiple = _account_multiple(
-        summary["totalPositionNotional"], summary["marginBalance"]
-    )
-    return "\n".join(
-        [
-            (
-                f"操作：{trade.symbol} {action_labels[trade.action]} "
-                f"{side_labels[trade.position_side]}"
-            ),
-            (
-                f"成交价格 {_number(trade.price)}｜成交数量 {_quantity(trade.quantity)}｜"
-                f"操作金额 {_money(amount)}"
-            ),
-            f"品种当前：{current_side} {_quantity(current_quantity)}",
-            (
-                f"开仓 {_number(entry_price)}｜"
-                f"现价 {_number(current.mark_price if current else None)}｜"
-                f"预计盈亏 {_money(current.estimated_pnl if current else None, signed=True)}"
-            ),
-            f"KOL 当前：账户保证金余额 {_money(summary['marginBalance'])}",
-            (
-                f"已估算持仓总额 {_money(summary['totalPositionNotional'])}｜"
-                f"仓位倍数（估算） {account_multiple}｜"
-                f"预计盈亏 {_money(summary['estimatedPnl'], signed=True)}"
-            ),
-        ]
+    return _mobile_trade_message(
+        kol.display_name,
+        [trade],
+        positions,
+        account.margin_balance if account is not None else None,
+        snapshot_is_current=_snapshot_matches(current, trade.position_after),
     )
 
 
@@ -495,7 +487,7 @@ def _format_notification(session: Session, signal: Signal) -> tuple[str, str]:
     if raw_post is not None and raw_post.platform == "binance_copy":
         trade_message = _trade_notification(session, signal, raw_post)
         if trade_message is not None:
-            return f"{platform} | {kol_name} | {published_text}", trade_message
+            return f"{kol_name}｜仓位变动 1笔", trade_message
     symbols = _json_list(signal.symbols_json)
     summary = signal.summary_cn or signal.summary
     stance = signal.stance_cn or signal.stance

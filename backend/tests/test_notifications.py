@@ -16,7 +16,13 @@ from app.models import (
     SignalAsset,
     Subscription,
 )
-from app.services.notifications import NtfyClient, _format_notification, dispatch_notifications
+from app.services.notifications import (
+    NtfyClient,
+    _format_notification,
+    _operation_lines,
+    dispatch_notifications,
+)
+from app.services.trade_structurer import TradePayload
 
 
 class FakeNtfyClient:
@@ -186,7 +192,7 @@ def test_notification_uses_binance_copy_platform_label() -> None:
     assert title == "Binance Copy | 熬鹰资本 | 2026-08-09 08:00"
 
 
-def test_binance_copy_notification_contains_operation_symbol_position_and_kol_summary() -> None:
+def test_binance_copy_notification_uses_compact_mobile_layout() -> None:
     reset_database()
     session = SessionLocal()
     try:
@@ -278,20 +284,63 @@ def test_binance_copy_notification_contains_operation_symbol_position_and_kol_su
     finally:
         session.close()
 
-    assert title == "Binance Copy | 熬鹰资本 | 2026-08-09 09:02"
-    assert "操作：BTCUSDT 加仓 多" in message
-    assert "成交价格 53,000.00" in message
-    assert "成交数量 0.05" in message
-    assert "操作金额 2,650.00 USDT" in message
-    assert "品种当前：多 0.15" in message
-    assert "开仓 51,000.00" in message
-    assert "现价 52,000.00" in message
-    assert "预计盈亏 +150.00 USDT" in message
-    assert "KOL 当前：账户保证金余额 137,889.65 USDT" in message
-    assert "已估算持仓总额 7,800.00 USDT" in message
-    assert "仓位倍数（估算） 0.06x" in message
-    assert "持仓保证金" not in message
-    assert "有效杠杆" not in message
+    assert title == "熬鹰资本｜仓位变动 1笔"
+    assert message == "\n".join(
+        [
+            "谁：熬鹰资本",
+            "时间：2026-08-09 09:02:00",
+            "",
+            "操作（1笔）",
+            "开 多 BTCUSDT",
+            "数量 0.05｜建仓价 53,000",
+            "杠杆 0.02x",
+            "",
+            "持仓（1）",
+            "BTCUSDT 多｜数量 0.15",
+            "均价 51,000｜标记价 52,000",
+            "盈亏 +150.00 USDT（+1.96%）｜杠杆 0.06x",
+        ]
+    )
+
+
+def test_close_operation_aggregates_quantity_price_and_realized_pnl() -> None:
+    def trade(record_id: str, quantity: str, price: str, pnl: str) -> TradePayload:
+        return TradePayload.model_validate(
+            {
+                "schemaVersion": 1,
+                "platform": "binance_copy",
+                "accountId": "5075281354358777856",
+                "sourceRecordId": record_id,
+                "revision": "r1",
+                "action": "REDUCE",
+                "effectiveAction": "DECREASE",
+                "symbol": "BTCUSDT",
+                "positionSide": "LONG",
+                "quantity": quantity,
+                "price": price,
+                "leverage": None,
+                "eventTime": f"2026-08-09T01:0{record_id}:00Z",
+                "positionAfter": {
+                    "side": "LONG",
+                    "quantity": "1",
+                    "entryPrice": "50000",
+                    "leverage": None,
+                    "confidence": "HIGH",
+                    "status": "ACTIVE",
+                },
+                "sourceRecord": {"totalPnl": pnl},
+            }
+        )
+
+    assert _operation_lines(
+        [trade("2", "0.1", "50000", "30"), trade("3", "0.2", "55000", "-10")],
+        "10000",
+    ) == [
+        "操作（2笔）",
+        "平 多 BTCUSDT｜2笔",
+        "数量 0.3｜平仓价 53,333.33",
+        "杠杆 1.60x｜盈亏 +20.00 USDT",
+    ]
 
 
 def test_repeated_dispatch_creates_one_event_and_one_publish_call() -> None:
@@ -351,6 +400,20 @@ def test_binance_copy_batch_waits_then_sends_one_aggregated_position_change() ->
                     leverage="10",
                     position_margin="954",
                     estimated_pnl="320",
+                    confidence="HIGH",
+                    status="ACTIVE",
+                    source_updated_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
+                ),
+                PositionEstimate(
+                    subscription_id=subscription.id,
+                    symbol="ETHUSDT",
+                    position_side="SHORT",
+                    side="SHORT",
+                    quantity="2",
+                    entry_price="3000",
+                    mark_price="2900",
+                    notional="5800",
+                    estimated_pnl="200",
                     confidence="HIGH",
                     status="ACTIVE",
                     source_updated_at=datetime(2026, 8, 9, 2, 5, tzinfo=UTC),
@@ -480,13 +543,27 @@ def test_binance_copy_batch_waits_then_sends_one_aggregated_position_change() ->
         assert len(session.scalars(select(NotificationEvent)).all()) == 1
         title = client.calls[0][2]
         message = client.calls[0][3]
-        assert title == "Binance Copy | 熬鹰资本 | 仓位变动 2 笔"
-        assert "共 2 笔成交" in message
-        assert "仓位：多 0.1 → 多 0.18（+0.08）" in message
-        assert "操作汇总：加仓 2 笔" in message
-        assert "成交数量合计 0.08" in message
-        assert "成交均价 52,750.00" in message
-        assert "成交额合计 4,220.00 USDT" in message
+        assert title == "熬鹰资本｜仓位变动 2笔"
+        assert message == "\n".join(
+            [
+                "谁：熬鹰资本",
+                "时间：2026-08-09 09:02:00–09:03:00",
+                "",
+                "操作（2笔）",
+                "开 多 BTCUSDT｜2笔",
+                "数量 0.08｜建仓价 52,750",
+                "杠杆 0.42x",
+                "",
+                "持仓（2）",
+                "BTCUSDT 多｜数量 0.18",
+                "均价 51,222.22｜标记价 53,000",
+                "盈亏 +320.00 USDT（+3.47%）｜杠杆 0.95x",
+                "",
+                "ETHUSDT 空｜数量 2",
+                "均价 3,000｜标记价 2,900",
+                "盈亏 +200.00 USDT（+3.33%）｜杠杆 0.58x",
+            ]
+        )
 
         no_change_payload = {
             **__import__("json").loads(first_post.raw_json),

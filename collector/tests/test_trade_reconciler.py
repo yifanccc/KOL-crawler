@@ -152,17 +152,38 @@ def test_reconcile_caps_confidence_and_marks_contradictions_unknown() -> None:
     ).position_for("BTCUSDT", "LONG")
     assert incomplete.confidence == "LOW"
 
-    contradictory = reconcile_records(
+    clamped = reconcile_records(
         [
             sample_record("1", "OPEN", "LONG", "0.10"),
             sample_record("2", "REDUCE", "LONG", "0.11"),
         ],
         history_complete=True,
+    )
+    clamped_position = clamped.position_for("BTCUSDT", "LONG")
+    assert clamped.events[-1].action == "CLOSE"
+    assert clamped_position.side == "FLAT"
+    assert clamped_position.quantity == Decimal("0")
+    assert clamped_position.status == "FLAT"
+    assert clamped_position.confidence == "HIGH"
+
+    contradictory = reconcile_records(
+        [
+            sample_record("1", "OPEN", "LONG", "0.10"),
+            sample_record("2", "REDUCE", "LONG", "0.11"),
+        ],
+        history_complete=False,
     ).position_for("BTCUSDT", "LONG")
     assert contradictory.side == "UNKNOWN"
     assert contradictory.quantity is None
     assert contradictory.status == "UNKNOWN"
     assert contradictory.confidence == "UNKNOWN"
+
+    baseline_close = reconcile_records(
+        [sample_record("1", "DECREASE", "LONG", "0.11")],
+        history_complete=True,
+    )
+    assert baseline_close.events[-1].action == "CLOSE"
+    assert baseline_close.position_for("BTCUSDT", "LONG").status == "FLAT"
 
     empty = reconcile_records([], history_complete=True)
     assert empty.events == []

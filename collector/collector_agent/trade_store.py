@@ -627,9 +627,13 @@ def trade_operation_snapshots_for(
     ).fetchall()
     if not rows:
         return []
+    state = connection.execute(
+        "SELECT trade_start_at FROM subscription_state WHERE subscription_id = ?",
+        (subscription_id,),
+    ).fetchone()
     reconciliation = reconcile_records(
         [_record_from_row(row) for row in rows],
-        history_complete=False,
+        history_complete=bool(state and state["trade_start_at"]),
     )
     snapshots = []
     for event in reconciliation.events:

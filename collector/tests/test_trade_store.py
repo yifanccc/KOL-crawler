@@ -12,7 +12,7 @@ from collector_agent.trade_models import (
     TradeCheckpoint,
     TradeRecordFetchResult,
 )
-from tests.trade_samples import sample_record, trade_result, trade_target
+from tests.trade_samples import checkpoint, sample_record, trade_result, trade_target
 
 
 def test_first_trade_fetch_builds_baseline_without_outbox(tmp_path) -> None:
@@ -429,3 +429,30 @@ def test_mark_trade_positions_unknown_clears_unreliable_quantity_only(tmp_path) 
     assert position.status == "UNKNOWN"
     assert position.stale_since == gap_at
     assert TradeCheckpoint.decode(store.checkpoint_for(7)).record_id == "1"
+
+
+def test_operation_snapshots_use_explicit_flat_baseline_for_over_close(tmp_path) -> None:
+    store = CollectorStore(tmp_path / "collector.sqlite3")
+    try:
+        start_at = datetime(2026, 8, 8, tzinfo=UTC)
+        target = replace(trade_target(), position_start_at=start_at)
+        store.ensure_trade_start(7, start_at)
+        records = [
+            sample_record("1", "INCREASE", "LONG", "10", price="1"),
+            sample_record("2", "DECREASE", "LONG", "12", price="2"),
+        ]
+        store.record_trade_fetch(
+            7,
+            target,
+            TradeRecordFetchResult(
+                records,
+                checkpoint("2"),
+                history_complete=True,
+            ),
+        )
+
+        operations = store.trade_operation_snapshots_for(7)
+    finally:
+        store.close()
+
+    assert [operation["action"] for operation in operations] == ["OPEN", "CLOSE"]
