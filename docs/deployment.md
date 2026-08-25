@@ -182,3 +182,5 @@ GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
 ## 本地采集机
 
 安装 Python 3.12 与 OpenCLI，执行一次 `opencli twitter login`，再创建 `collector/.env`。确认 `COLLECTOR_AGENT_ID` 与公网一致、`COLLECTOR_TOKEN` 的 SHA-256 等于公网 `COLLECTOR_TOKEN_HASH` 后，在 macOS 执行 `./scripts/collector-launchd-install.sh`。LaunchAgent 会在登录后启动并在异常退出后重启；项目移动、Python 或 OpenCLI 路径变化后需重新安装 plist。系统不会自动登录 X。
+
+Binance Copy 订阅的“空仓起算时间”由设置页按北京时间录入，API 统一保存为 UTC。修改时间会立即清空服务端仓位、操作和账户快照；Collector 下一轮读取配置后会原子清空本地交易账本与待上传 Outbox，并把起算时间后的首轮完整读取作为静默基线。若首轮为空，基线状态仍会持久化，之后出现的第一笔真实交易会正常进入通知流程。起算时间不能早于 Binance 当前可验证的 30 天窗口；起算后的交易超过单页 100 条时，Collector 会拒绝不完整重建并报告访问受限，不会静默截断。
