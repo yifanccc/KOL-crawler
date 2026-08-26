@@ -328,7 +328,6 @@ def _position_lines(
 
 
 def _mobile_trade_message(
-    kol_name: str,
     trades: list[TradePayload],
     positions: list[PositionEstimate],
     margin_balance: Decimal | str | None,
@@ -336,8 +335,7 @@ def _mobile_trade_message(
     snapshot_is_current: bool,
 ) -> str:
     lines = [
-        f"谁：{kol_name}",
-        f"时间：{_batch_time_text(trades)}",
+        _batch_time_text(trades),
         "",
         *_operation_lines(trades, margin_balance),
         "",
@@ -413,7 +411,6 @@ def _trade_batch_notification(
     margin_balance = account.margin_balance if account is not None else None
     title = f"{kol.display_name}｜仓位变动 {len(trades)}笔"
     return title, _mobile_trade_message(
-        kol.display_name,
         trades,
         positions,
         margin_balance,
@@ -509,7 +506,6 @@ def _trade_notification(
         None,
     )
     return _mobile_trade_message(
-        kol.display_name,
         [trade],
         positions,
         account.margin_balance if account is not None else None,

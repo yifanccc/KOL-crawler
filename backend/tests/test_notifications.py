@@ -392,8 +392,7 @@ def test_binance_copy_notification_uses_compact_mobile_layout() -> None:
     assert title == "熬鹰资本｜仓位变动 1笔"
     assert message == "\n".join(
         [
-            "谁：熬鹰资本",
-            "时间：2026-08-09 09:02:00",
+            "2026-08-09 09:02:00",
             "",
             "操作（1笔）",
             "开 多 BTCUSDT",
@@ -651,8 +650,7 @@ def test_binance_copy_batch_waits_then_sends_one_aggregated_position_change() ->
         assert title == "熬鹰资本｜仓位变动 2笔"
         assert message == "\n".join(
             [
-                "谁：熬鹰资本",
-                "时间：2026-08-09 09:02:00–09:03:00",
+                "2026-08-09 09:02:00–09:03:00",
                 "",
                 "操作（2笔）",
                 "开 多 BTCUSDT｜2笔",
