@@ -264,6 +264,17 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - 容器内用真实 BTCUSDT、XAUUSDT 当前仓位只读渲染新消息：数量、均价、标记价、预计盈亏、按建仓名义金额计算的盈亏比例，以及按账户保证金余额计算的仓位倍数均有值。没有向真实 ntfy topic 发送测试通知；首次真实成交推送仍由下一次仓位变动触发。
 - 发布后生产磁盘剩余约 3.0 GB（使用率 93%），未运行全局 Docker prune。
 
+### Binance Copy ntfy 失败重试生产修复
+
+2026-08-26 排查熬鹰资本最新 MSTRUSDT 成交未推送：交易、RawPost 和 Signal 都已正常入库，唯一通知事件 228 在首次发送时收到 `429 Too Many Requests`。旧逻辑虽然保留了 `failed` 事件，但后续调度会因 `(signal_id, notification_rule_id)` 唯一约束直接跳过，因此一次临时限流会永久漏推；同一轮排查还发现此前批次事件 227 因相同 429 未送达。
+
+- 通知事件新增 `attempt_count` 和 `next_attempt_at`，失败后在同一事件上按服务端 `Retry-After` 或 60 秒起的指数退避继续尝试，最多 8 次；`sent` 事件仍不会重复发送。分析循环即使没有待处理 RawPost 也会处理到期重试，旧失败事件没有显式排期时不会被批量回放。
+- 生产 API 容器直连 `ntfy.sh` 的 TLS 握手超时，经现有容器代理访问返回 200，因此最终实现保留代理环境，没有把 ntfy 加入 `NO_PROXY`。
+- 发布前数据库、源码和 `.env` 校验值备份位于 `/home/deploy/kol-crawler/.runtime/deploy-backups/ntfy-retry-20260826214142`。生产只重建并替换 API；Web、MySQL、Redis、Nginx 和 `.env` 未改写或重启。
+- 只为已核实的事件 227、228 写入一次到期时间。两条事件均在新机制第一次回放后于 UTC `2026-08-26 13:48:45` 变为 `sent`，`attempt_count=1`、`next_attempt_at=NULL`、错误信息清空；Signal 1255 和 1261 合计仍只有 2 条 NotificationEvent，没有产生重复记录。
+- 最新操作仍为 PositionOperation 160：MSTRUSDT、开空增仓、数量 `2129.79000000`、成交价 `126.80105640`、UTC `2026-08-25 19:33:37`；其 RawPost 1360、Signal 1261 和 NotificationEvent 228 关联一致。
+- 最终后端全量 `102 passed`，Collector 全量 `65 passed`，前端 Node `25 passed`；TypeScript、Next.js 生产构建、生产部署契约和 `git diff --check` 均通过。API `/health` 与 HTTPS 登录页返回 200，生产磁盘剩余约 3.5 GB（使用率 91%）。
+
 ## 外部前置条件
 
 - ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。
