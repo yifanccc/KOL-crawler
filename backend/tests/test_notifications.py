@@ -61,23 +61,7 @@ def test_ntfy_client_uses_json_for_utf8_title_and_message(mocker) -> None:
         },
         headers={"Authorization": "Bearer secret-token"},
         timeout=15,
-        trust_env=False,
     )
-    response.raise_for_status.assert_called_once_with()
-
-
-def test_ntfy_client_keeps_environment_proxy_for_custom_server(mocker) -> None:
-    response = mocker.Mock()
-    publish = mocker.patch("app.services.notifications.httpx.post", return_value=response)
-
-    NtfyClient().publish(
-        server="https://ntfy.example/",
-        topic="private-topic",
-        title="仓位变动",
-        message="BTCUSDT 开多",
-    )
-
-    assert publish.call_args.kwargs["trust_env"] is True
     response.raise_for_status.assert_called_once_with()
 
 

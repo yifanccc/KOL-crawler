@@ -131,7 +131,7 @@ Dashboard 的 Collector 状态来自最近一次 heartbeat；心跳陈旧时先�
 
 ## 通知排查
 
-普通信号通知以 `(signal_id, notification_rule_id)` 唯一；已经 `sent` 的事件不会再次 publish。发送失败会保留同一事件，并由分析循环按 `Retry-After` 或 60 秒起的指数退避重试，最多尝试 8 次，不会创建重复事件。历史失败事件没有 `next_attempt_at` 时不会被自动回放。Binance Copy 的批量通知使用该批第一条 Signal 作为唯一锚点，同批后续 Signal 不会重复 publish。官方 `ntfy.sh` 直连，避免继承模型服务代理造成共享出口限流；自托管 ntfy 地址仍沿用容器代理环境。真实 ntfy topic/token 只放在 `.env`；用部署方明确授权的测试规则发送一条通知并记录 HTTP 状态，日志中不得输出 token。provider 健康通知由本机 Collector 发送，与公网信号通知相互独立。
+普通信号通知以 `(signal_id, notification_rule_id)` 唯一；已经 `sent` 的事件不会再次 publish。发送失败会保留同一事件，并由分析循环按 `Retry-After` 或 60 秒起的指数退避重试，最多尝试 8 次，不会创建重复事件。历史失败事件没有 `next_attempt_at` 时不会被自动回放。Binance Copy 的批量通知使用该批第一条 Signal 作为唯一锚点，同批后续 Signal 不会重复 publish。ntfy 请求沿用容器代理环境；生产容器直连 `ntfy.sh` 不可用时不得加入 `NO_PROXY`。真实 ntfy topic/token 只放在 `.env`；用部署方明确授权的测试规则发送一条通知并记录 HTTP 状态，日志中不得输出 token。provider 健康通知由本机 Collector 发送，与公网信号通知相互独立。
 
 信号标题固定为 `平台 | KOL昵称 | 原帖北京时间`，例如 `X | Serenity | 2026-07-13 08:45`。昵称只读取原帖 `author_name`，绝不使用账号 handle；昵称缺失时显示 `未知 KOL`。原帖时间转换为 `Asia/Shanghai` 并显示到分钟，缺失时显示 `时间未知`。
 

@@ -2,7 +2,6 @@ import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -82,7 +81,6 @@ class NtfyClient:
             json={"topic": topic, "title": title, "message": message},
             headers=headers,
             timeout=15,
-            trust_env=urlparse(server).hostname != "ntfy.sh",
         )
         response.raise_for_status()
 
