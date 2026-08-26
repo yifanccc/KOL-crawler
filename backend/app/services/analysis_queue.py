@@ -8,7 +8,7 @@ from app.models import RawPost, Signal, SignalAsset, SignalTag, Subscription
 from app.models.subscription import TRADE_PLATFORMS
 from app.services.assets import candidate_from_symbol
 from app.services.ingestion import _get_or_create_asset
-from app.services.notifications import dispatch_notifications
+from app.services.notifications import dispatch_notifications, retry_failed_notifications
 from app.services.structurer import FallbackStructurer, HeuristicStructurer, Structurer
 from app.services.trade_structurer import build_trade_signal_fields
 
@@ -93,4 +93,6 @@ def process_pending_posts(
             raw_post.analysis_status = "failed"
             raw_post.analysis_error = str(exc)[:2000]
         session.commit()
+    retry_failed_notifications(session)
+    session.commit()
     return completed

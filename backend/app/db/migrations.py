@@ -51,6 +51,10 @@ MIGRATION_COLUMNS = {
         "estimated_pnl": "VARCHAR(64) NULL",
         "price_updated_at": "DATETIME NULL",
     },
+    "notification_events": {
+        "attempt_count": "INT NOT NULL DEFAULT 0",
+        "next_attempt_at": "DATETIME NULL",
+    },
 }
 
 

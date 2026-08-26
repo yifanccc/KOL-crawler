@@ -1,5 +1,6 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import httpx
 from sqlalchemy import select
 
 from app.db.base import Base
@@ -21,6 +22,7 @@ from app.services.notifications import (
     _format_notification,
     _operation_lines,
     dispatch_notifications,
+    retry_failed_notifications,
 )
 from app.services.trade_structurer import TradePayload
 
@@ -59,7 +61,23 @@ def test_ntfy_client_uses_json_for_utf8_title_and_message(mocker) -> None:
         },
         headers={"Authorization": "Bearer secret-token"},
         timeout=15,
+        trust_env=False,
     )
+    response.raise_for_status.assert_called_once_with()
+
+
+def test_ntfy_client_keeps_environment_proxy_for_custom_server(mocker) -> None:
+    response = mocker.Mock()
+    publish = mocker.patch("app.services.notifications.httpx.post", return_value=response)
+
+    NtfyClient().publish(
+        server="https://ntfy.example/",
+        topic="private-topic",
+        title="仓位变动",
+        message="BTCUSDT 开多",
+    )
+
+    assert publish.call_args.kwargs["trust_env"] is True
     response.raise_for_status.assert_called_once_with()
 
 
@@ -122,6 +140,109 @@ def test_dispatch_notifications_sends_matching_ntfy_rule_and_records_event() -> 
     assert "KOL：" not in message
     assert "要点：" not in message
     assert "来源：" not in message
+
+
+def test_failed_notification_retries_when_due_without_duplicate_event() -> None:
+    reset_database()
+    session = SessionLocal()
+
+    class FailOnceNtfyClient(FakeNtfyClient):
+        def publish(self, server, topic, title, message, token=None) -> None:
+            self.calls.append((server, topic, title, message, token))
+            if len(self.calls) == 1:
+                request = httpx.Request("POST", server)
+                response = httpx.Response(
+                    429,
+                    headers={"Retry-After": "120"},
+                    request=request,
+                )
+                raise httpx.HTTPStatusError(
+                    "rate limited",
+                    request=request,
+                    response=response,
+                )
+
+    try:
+        raw_post = RawPost(
+            platform="x",
+            external_id="retry",
+            author_name="Serenity",
+            published_at=datetime(2026, 8, 26, tzinfo=UTC),
+            raw_text="$BTC 看多",
+        )
+        session.add(raw_post)
+        session.flush()
+        signal = Signal(
+            raw_post_id=raw_post.id,
+            actionable=True,
+            stance="bullish",
+            stance_cn="多",
+            summary="BTC 看多",
+            symbols_json='["BTC"]',
+            confidence="高",
+            structured_status="ok",
+        )
+        session.add(signal)
+        session.flush()
+        asset = Asset(symbol="BTC", market="CRYPTO", asset_type="crypto")
+        session.add(asset)
+        session.flush()
+        session.add(SignalAsset(signal_id=signal.id, asset_id=asset.id))
+        rule = NotificationRule(
+            ntfy_server="https://ntfy.sh",
+            ntfy_topic="kol-test",
+            min_confidence="中",
+            require_asset=True,
+            enabled=True,
+        )
+        session.add(rule)
+        session.commit()
+
+        attempted_at = datetime(2026, 8, 26, 1, tzinfo=UTC)
+        client = FailOnceNtfyClient()
+        assert dispatch_notifications(
+            session,
+            signal,
+            client=client,
+            now=attempted_at,
+        ) == 0
+        session.commit()
+
+        event = session.scalar(select(NotificationEvent))
+        assert event is not None
+        assert event.status == "failed"
+        assert event.attempt_count == 1
+        next_attempt_at = event.next_attempt_at
+        assert next_attempt_at is not None
+        if next_attempt_at.tzinfo is None:
+            next_attempt_at = next_attempt_at.replace(tzinfo=UTC)
+        assert next_attempt_at == attempted_at + timedelta(seconds=120)
+
+        assert retry_failed_notifications(
+            session,
+            client=client,
+            now=attempted_at + timedelta(seconds=119),
+        ) == 0
+        assert len(client.calls) == 1
+
+        assert retry_failed_notifications(
+            session,
+            client=client,
+            now=attempted_at + timedelta(seconds=120),
+        ) == 1
+        session.commit()
+        session.refresh(event)
+
+        assert len(client.calls) == 2
+        assert event.status == "sent"
+        assert event.attempt_count == 2
+        assert event.next_attempt_at is None
+        assert event.error_message is None
+        assert session.scalar(select(NotificationEvent)) is event
+        assert dispatch_notifications(session, signal, client=client) == 0
+        assert len(client.calls) == 2
+    finally:
+        session.close()
 
 
 def test_notification_title_never_falls_back_to_account_handle() -> None:

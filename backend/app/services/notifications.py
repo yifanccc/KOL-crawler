@@ -1,6 +1,8 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -29,6 +31,10 @@ PLATFORM_LABELS = {
     "binance_copy": "Binance Copy",
 }
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+NOTIFICATION_MAX_ATTEMPTS = 8
+NOTIFICATION_RETRY_BASE_SECONDS = 60
+NOTIFICATION_RETRY_MAX_SECONDS = 3600
+NOTIFICATION_RETRY_AFTER_MAX_SECONDS = 86400
 
 
 def _json_list(value: str | None) -> list[str]:
@@ -76,8 +82,48 @@ class NtfyClient:
             json={"topic": topic, "title": title, "message": message},
             headers=headers,
             timeout=15,
+            trust_env=urlparse(server).hostname != "ntfy.sh",
         )
         response.raise_for_status()
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _retry_after_seconds(exc: Exception, attempted_at: datetime) -> int | None:
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return None
+    value = exc.response.headers.get("Retry-After")
+    if not value:
+        return None
+    try:
+        seconds = int(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        seconds = int((_utc_datetime(retry_at) - attempted_at).total_seconds())
+    return max(0, min(seconds, NOTIFICATION_RETRY_AFTER_MAX_SECONDS))
+
+
+def _next_notification_attempt_at(
+    exc: Exception,
+    attempt_count: int,
+    attempted_at: datetime,
+) -> datetime | None:
+    if attempt_count >= NOTIFICATION_MAX_ATTEMPTS:
+        return None
+    exponential_delay = min(
+        NOTIFICATION_RETRY_BASE_SECONDS * (2 ** max(0, attempt_count - 1)),
+        NOTIFICATION_RETRY_MAX_SECONDS,
+    )
+    retry_after = _retry_after_seconds(exc, attempted_at)
+    delay_seconds = max(exponential_delay, retry_after or 0)
+    return attempted_at + timedelta(seconds=delay_seconds)
 
 
 def _asset_markets(session: Session, signal: Signal) -> list[str]:
@@ -504,8 +550,11 @@ def dispatch_notifications(
     session: Session,
     signal: Signal,
     client: NtfyClient | None = None,
+    *,
+    now: datetime | None = None,
 ) -> int:
     client = client or NtfyClient()
+    attempted_at = _utc_datetime(now or datetime.now(UTC))
     raw_post = session.get(RawPost, signal.raw_post_id)
     eligible_signals = [signal]
     anchor_signal = signal
@@ -542,17 +591,43 @@ def dispatch_notifications(
             continue
         if not rule.ntfy_server or not rule.ntfy_topic:
             continue
-        try:
-            with session.begin_nested():
-                event = NotificationEvent(
-                    signal_id=anchor_signal.id,
-                    notification_rule_id=rule.id,
-                    status="pending",
-                )
-                session.add(event)
-                session.flush()
-        except IntegrityError:
-            continue
+        event = session.scalar(
+            select(NotificationEvent)
+            .where(
+                NotificationEvent.signal_id == anchor_signal.id,
+                NotificationEvent.notification_rule_id == rule.id,
+            )
+            .with_for_update()
+        )
+        if event is None:
+            try:
+                with session.begin_nested():
+                    event = NotificationEvent(
+                        signal_id=anchor_signal.id,
+                        notification_rule_id=rule.id,
+                        status="pending",
+                    )
+                    session.add(event)
+                    session.flush()
+            except IntegrityError:
+                continue
+        else:
+            next_attempt_at = (
+                _utc_datetime(event.next_attempt_at)
+                if event.next_attempt_at is not None
+                else None
+            )
+            if (
+                event.status != "failed"
+                or next_attempt_at is None
+                or next_attempt_at > attempted_at
+            ):
+                continue
+            event.status = "pending"
+            event.error_message = None
+            event.next_attempt_at = None
+
+        event.attempt_count = (event.attempt_count or 0) + 1
         try:
             title, message = formatted or _format_notification(session, signal)
             client.publish(
@@ -564,9 +639,67 @@ def dispatch_notifications(
             )
         except Exception as exc:
             event.status = "failed"
-            event.error_message = str(exc)
+            event.error_message = str(exc)[:2000]
+            event.next_attempt_at = _next_notification_attempt_at(
+                exc,
+                event.attempt_count,
+                attempted_at,
+            )
             continue
         event.status = "sent"
-        event.sent_at = datetime.now(UTC)
+        event.error_message = None
+        event.next_attempt_at = None
+        event.sent_at = attempted_at
         sent_count += 1
+    return sent_count
+
+
+def retry_failed_notifications(
+    session: Session,
+    client: NtfyClient | None = None,
+    *,
+    limit: int = 10,
+    now: datetime | None = None,
+) -> int:
+    attempted_at = _utc_datetime(now or datetime.now(UTC))
+    due_events = list(
+        session.scalars(
+            select(NotificationEvent)
+            .where(
+                NotificationEvent.status == "failed",
+                NotificationEvent.next_attempt_at.is_not(None),
+                NotificationEvent.next_attempt_at <= attempted_at,
+            )
+            .order_by(NotificationEvent.next_attempt_at, NotificationEvent.id)
+            .limit(limit)
+        ).all()
+    )
+    grouped: dict[int, list[NotificationEvent]] = {}
+    for event in due_events:
+        grouped.setdefault(event.signal_id, []).append(event)
+
+    sent_count = 0
+    for signal_id, events in grouped.items():
+        signal = session.get(Signal, signal_id)
+        if signal is None:
+            for event in events:
+                event.next_attempt_at = None
+                event.error_message = "Notification retry stopped: signal is missing"
+            continue
+        attempts_before = {event.id: event.attempt_count for event in events}
+        sent_count += dispatch_notifications(
+            session,
+            signal,
+            client=client,
+            now=attempted_at,
+        )
+        for event in events:
+            if (
+                event.status == "failed"
+                and event.attempt_count == attempts_before[event.id]
+            ):
+                event.next_attempt_at = None
+                event.error_message = (
+                    "Notification retry stopped: rule is no longer eligible"
+                )
     return sent_count

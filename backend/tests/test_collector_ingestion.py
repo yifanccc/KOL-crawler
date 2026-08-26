@@ -14,6 +14,20 @@ from app.services.structurer import HeuristicStructurer
 HEADERS = {"Authorization": "Bearer collector-test-token"}
 
 
+def test_analysis_queue_retries_notifications_without_pending_posts(monkeypatch) -> None:
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    retry_calls = []
+    monkeypatch.setattr(
+        "app.services.analysis_queue.retry_failed_notifications",
+        lambda session: retry_calls.append(session) or 0,
+    )
+
+    with SessionLocal() as session:
+        assert process_pending_posts(session, HeuristicStructurer()) == 0
+        assert retry_calls == [session]
+
+
 def test_collector_upload_is_per_item_idempotent_and_analysis_runs_once(monkeypatch) -> None:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

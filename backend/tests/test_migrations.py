@@ -36,6 +36,7 @@ SUBSCRIPTION_TRADE_COLUMNS = {
     "visibility",
 }
 KOL_IDENTITY_COLUMNS = {"platform"}
+NOTIFICATION_RETRY_COLUMNS = {"attempt_count", "next_attempt_at"}
 
 
 def column_names(engine, table_name: str) -> set[str]:
@@ -55,6 +56,7 @@ def test_migrations_are_idempotent_for_fresh_schema() -> None:
         *SUBSCRIPTION_LIFECYCLE_COLUMNS,
         *SUBSCRIPTION_TRADE_COLUMNS,
     } <= column_names(engine, "subscriptions")
+    assert NOTIFICATION_RETRY_COLUMNS <= column_names(engine, "notification_events")
     subscription_constraints = inspect(engine).get_unique_constraints("subscriptions")
     assert any(
         set(constraint["column_names"] or []) == {"platform", "platform_account_id"}
@@ -71,6 +73,25 @@ def test_migrations_are_idempotent_for_fresh_schema() -> None:
         and index["column_names"] == ["subscription_id", "notification_batch_id"]
         for index in indexes
     )
+
+
+def test_migrations_add_notification_retry_columns_to_legacy_schema() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    metadata = MetaData()
+    Table(
+        "notification_events",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("signal_id", Integer, nullable=False),
+        Column("notification_rule_id", Integer),
+        Column("status", String(32), nullable=False),
+    )
+    metadata.create_all(engine)
+
+    run_schema_migrations(engine)
+    run_schema_migrations(engine)
+
+    assert NOTIFICATION_RETRY_COLUMNS <= column_names(engine, "notification_events")
 
 
 def test_migrations_add_binance_copy_identity_and_private_visibility() -> None:
