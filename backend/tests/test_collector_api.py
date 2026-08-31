@@ -54,7 +54,7 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
                 "platform_handle": "熬鹰资本",
                 "visibility": "private",
                 "position_start_at": datetime(2026, 8, 18, 16, tzinfo=UTC),
-                "interval_minutes": 10,
+                "interval_minutes": 1,
                 "enabled": True,
             },
         )
@@ -103,6 +103,7 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
     )
     assert trade_target["accountId"] == "5075281354358777856"
     assert trade_target["positionStartAt"] == "2026-08-18T16:00:00+00:00"
+    assert trade_target["intervalMinutes"] == 1
     regular_target = next(
         subscription for subscription in subscriptions if subscription["platform"] == "x"
     )

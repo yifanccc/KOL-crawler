@@ -9,7 +9,7 @@ class CollectorSettings:
     collector_agent_id: str
     collector_token: str
     db_path: Path
-    config_poll_seconds: int = 600
+    config_poll_seconds: int = 60
     initial_fetch_limit: int = 1
     catchup_fetch_limit: int = 5
     ntfy_server: str | None = None
@@ -26,7 +26,7 @@ class CollectorSettings:
             collector_agent_id=os.environ["COLLECTOR_AGENT_ID"],
             collector_token=os.environ["COLLECTOR_TOKEN"],
             db_path=Path(os.environ.get("COLLECTOR_DB_PATH", "collector.sqlite3")),
-            config_poll_seconds=max(1, int(os.environ.get("CONFIG_POLL_SECONDS", "600"))),
+            config_poll_seconds=max(1, int(os.environ.get("CONFIG_POLL_SECONDS", "60"))),
             initial_fetch_limit=max(1, int(os.environ.get("INITIAL_FETCH_LIMIT", "1"))),
             catchup_fetch_limit=max(1, int(os.environ.get("CATCHUP_FETCH_LIMIT", "5"))),
             ntfy_server=os.environ.get("NTFY_SERVER") or None,

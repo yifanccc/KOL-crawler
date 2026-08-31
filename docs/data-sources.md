@@ -29,7 +29,7 @@ POST https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/lead-por
 
 Binance 响应没有稳定订单 ID。provider 使用成交时间、标的、方向、仓位方向、类型、数量和均价生成 `sourceRecordId`，再对可修订成交字段生成 `revision`；所有数值在业务层使用 `Decimal`。`BUY LONG`/`SELL SHORT` 先映射为 `INCREASE`，`SELL LONG`/`BUY SHORT` 映射为 `DECREASE`，本地账本再结合此前推测仓位产生 `OPEN/ADD/REDUCE/CLOSE`。仓位增减只使用 `executedQty` 的币数；成交金额、标记价格和保证金不参与数量账本。
 
-每次 10 分钟轮询都重叠读取最近 100 条：
+每次 1 分钟轮询都重叠读取最近 100 条：
 
 - 第一次成功读取只建立基线，不上传信号、不通知，也不声称获得完整持仓。
 - 后续只为新增的 `(sourceRecordId, revision)` 生成事件；重复响应保持幂等。

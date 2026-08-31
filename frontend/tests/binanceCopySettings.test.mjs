@@ -29,7 +29,7 @@ test("Binance Copy create payload has no model or prompt fields", () => {
     handle: "熬鹰资本",
     accountId: "5075281354358777856",
     positionStartAt: "2026-08-18T16:00:00.000Z",
-    intervalMinutes: 10,
+    intervalMinutes: 1,
     markets: ["crypto"],
     ntfyServer: "https://ntfy.sh",
     ntfyTopic: "kol-copy",

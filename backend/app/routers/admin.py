@@ -21,7 +21,11 @@ from app.models import (
     PositionOperation,
     Subscription,
 )
-from app.models.subscription import DEFAULT_MONITOR_INTERVAL_MINUTES, TRADE_PLATFORMS
+from app.models.subscription import (
+    DEFAULT_MONITOR_INTERVAL_MINUTES,
+    TRADE_MONITOR_INTERVAL_MINUTES,
+    TRADE_PLATFORMS,
+)
 from app.routers.auth import authenticate, require_authenticated, set_session_cookie
 from app.services.collector_health import collector_health_payload
 from app.services.signal_feed import signal_page
@@ -87,8 +91,10 @@ class SubscriptionCreate(BaseModel):
         if self.platform in TRADE_PLATFORMS:
             if self.accountId is None:
                 raise ValueError("accountId is required for private trade platforms")
-            if self.intervalMinutes != DEFAULT_MONITOR_INTERVAL_MINUTES:
-                raise ValueError("private trade platforms require a 10 minute interval")
+            if "intervalMinutes" not in self.model_fields_set:
+                self.intervalMinutes = TRADE_MONITOR_INTERVAL_MINUTES
+            elif self.intervalMinutes != TRADE_MONITOR_INTERVAL_MINUTES:
+                raise ValueError("private trade platforms require a 1 minute interval")
             prompt_fields = {
                 "prompt",
                 "systemPrompt",
@@ -471,11 +477,11 @@ def update_subscription(
     if payload.intervalMinutes is not None:
         if (
             subscription.platform in TRADE_PLATFORMS
-            and payload.intervalMinutes != DEFAULT_MONITOR_INTERVAL_MINUTES
+            and payload.intervalMinutes != TRADE_MONITOR_INTERVAL_MINUTES
         ):
             raise HTTPException(
                 status_code=422,
-                detail="private trade platforms require a 10 minute interval",
+                detail="private trade platforms require a 1 minute interval",
             )
         subscription.interval_minutes = payload.intervalMinutes
     if payload.prompt is not None:

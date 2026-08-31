@@ -12,7 +12,7 @@ launchctl print gui/$(id -u)/com.caoyifan.kol-crawler.collector
 
 安装脚本会把当前 Python 路径和当前 `PATH` 固化到 plist，使 launchd 能找到 NVM 安装的 `opencli`。如果安装命令所在终端配置了 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`，脚本也会把已有值经过 XML 转义后写入权限为 `600` 的 plist，供 OpenCLI 在 launchd 最小环境中使用；安装过程和日志不会输出代理值。代理、Python、Node/OpenCLI 路径变化或项目移动后，都要重新执行安装脚本。
 
-plist 不得设置 `ProcessType=Background`。真实验证表明该策略会过度降权 Playwright/Chrome：相同 Binance 请求在普通进程约 15 秒成功，在后台策略下约 2 分钟后失败。Collector 仍由 `RunAtLoad`、`KeepAlive` 和自身 10 分钟循环控制，不需要用 `ProcessType` 才能常驻。
+plist 不得设置 `ProcessType=Background`。真实验证表明该策略会过度降权 Playwright/Chrome：相同 Binance 请求在普通进程约 15 秒成功，在后台策略下约 2 分钟后失败。Collector 仍由 `RunAtLoad`、`KeepAlive` 和自身调度循环控制，不需要用 `ProcessType` 才能常驻。
 
 日常管理：
 
@@ -38,7 +38,7 @@ Collector 每轮检查都会按订阅向 `.runtime/collector.log` 写一条结�
 rg 'status=(success|skipped|failed)' .runtime/collector.log
 ```
 
-Collector 配置循环和所有正常订阅的默认抓取间隔均为 10 分钟（`CONFIG_POLL_SECONDS=600`、`intervalMinutes=10`）。Dashboard 仍每 60 秒读取一次已完成数据，但后台刷新不会清空当前页面或显示全屏 Loading；抓取和页面刷新是两个独立周期。
+Collector 配置循环为 60 秒（`CONFIG_POLL_SECONDS=60`）。Binance Copy 交易订阅固定为 `intervalMinutes=1`，普通订阅仍默认 10 分钟；每次实际抓取间隔还会包含上轮网络请求耗时。Dashboard 仍每 60 秒读取一次已完成数据，但后台刷新不会清空当前页面或显示全屏 Loading；抓取和页面刷新是两个独立周期。
 
 首次没有 checkpoint 时只初始化最新 `INITIAL_FETCH_LIMIT=1` 条；Collector 停机后恢复时，已有 checkpoint 的订阅补抓最近最多 `CATCHUP_FETCH_LIMIT=5` 条。少于 5 条会全部补齐，超过 5 条时更老的超额帖子会跳过。帖子与新 checkpoint 在同一 SQLite 事务中写入，之后即使公网上传失败，也会留在 Outbox 中继续重试。
 
@@ -52,7 +52,7 @@ Collector 上传新帖后，API 会在工作线程中执行同步模型分析，
 
 1. `./scripts/collector-status.sh` 输出 `running <pid>`；
 2. `.runtime/collector.log` 没有缺少 `PUBLIC_API_URL`、`COLLECTOR_AGENT_ID`、`COLLECTOR_TOKEN` 或浏览器启动错误；
-3. Admin 的 Collector 心跳时间在约两个 `CONFIG_POLL_SECONDS`（默认 20 分钟）内，并且目标 provider 为 `healthy`/`authenticated`。
+3. Admin 的 Collector 心跳时间在约两个 `CONFIG_POLL_SECONDS`（默认 2 分钟）内，并且目标 provider 为 `healthy`/`authenticated`。
 
 Dashboard 展示的是“最后一次 heartbeat”，历史记录为 healthy 不代表当前进程仍在运行。`collector/.env` 不存在或 token 与公网 hash 不匹配时，collector 无法正常启动。
 

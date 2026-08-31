@@ -103,13 +103,15 @@ def test_migrations_add_binance_copy_identity_and_private_visibility() -> None:
         Column("id", Integer, primary_key=True),
         Column("platform", String(32), nullable=False),
         Column("platform_handle", String(255), nullable=False),
+        Column("interval_minutes", Integer, nullable=False, default=10),
     )
     metadata.create_all(engine)
     with engine.begin() as connection:
         connection.execute(
             text(
-                "INSERT INTO subscriptions (id, platform, platform_handle) VALUES "
-                "(1, 'x', 'legacy'), (2, 'binance_copy', '熬鹰资本')"
+                "INSERT INTO subscriptions "
+                "(id, platform, platform_handle, interval_minutes) VALUES "
+                "(1, 'x', 'legacy', 10), (2, 'binance_copy', '熬鹰资本', 10)"
             )
         )
 
@@ -119,9 +121,12 @@ def test_migrations_add_binance_copy_identity_and_private_visibility() -> None:
     assert SUBSCRIPTION_TRADE_COLUMNS <= column_names(engine, "subscriptions")
     with engine.connect() as connection:
         visibility = connection.execute(
-            text("SELECT id, visibility FROM subscriptions ORDER BY id")
+            text(
+                "SELECT id, visibility, interval_minutes "
+                "FROM subscriptions ORDER BY id"
+            )
         ).all()
-    assert visibility == [(1, "public"), (2, "private")]
+    assert visibility == [(1, "public", 10), (2, "private", 1)]
 
     with engine.begin() as connection:
         connection.execute(

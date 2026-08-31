@@ -17,6 +17,7 @@ from app.db.base import Base
 
 
 DEFAULT_MONITOR_INTERVAL_MINUTES = 10
+TRADE_MONITOR_INTERVAL_MINUTES = 1
 TRADE_PLATFORMS = frozenset({"binance_copy"})
 
 

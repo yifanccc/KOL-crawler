@@ -185,6 +185,7 @@ def run_schema_migrations(engine: Engine) -> None:
                     )
                 )
                 trade_reset_values = {
+                    "interval_minutes": "1",
                     "prompt": "NULL",
                     "system_prompt": "NULL",
                     "user_prompt": "NULL",
