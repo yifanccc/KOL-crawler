@@ -275,6 +275,17 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - 最新操作仍为 PositionOperation 160：MSTRUSDT、开空增仓、数量 `2129.79000000`、成交价 `126.80105640`、UTC `2026-08-25 19:33:37`；其 RawPost 1360、Signal 1261 和 NotificationEvent 228 关联一致。
 - 最终后端全量 `102 passed`，Collector 全量 `65 passed`，前端 Node `25 passed`；TypeScript、Next.js 生产构建、生产部署契约和 `git diff --check` 均通过。API `/health` 与 HTTPS 登录页返回 200，生产磁盘剩余约 3.5 GB（使用率 91%）。
 
+### Binance Copy 一分钟监测生产部署
+
+2026-08-31 将 Binance Copy 订阅的固定监测间隔从 10 分钟改为 1 分钟；普通 X 和 Binance Square 订阅仍保持 10 分钟。新增订阅默认使用 1 分钟，管理端不再接受 Binance Copy 的其他间隔，API 启动迁移也会将已有 Binance Copy 订阅统一修正为 1 分钟。
+
+- 最终后端全量 `102 passed`，Collector 全量 `65 passed`，前端 Node `25 passed`；TypeScript `--noEmit`、Next.js 生产构建、生产部署契约与 `git diff --check` 均通过。发布提交为 `362b794`。
+- 发布前停止本机 Collector；本机 SQLite 与配置备份位于 `.runtime/deploy-backups/binance-copy-one-minute-20260831080419`，线上数据库、源码与 `.env` 校验值备份位于 `/home/deploy/kol-crawler/.runtime/deploy-backups/binance-copy-one-minute-20260831080419`。
+- 线上只重建并替换 API、Web；MySQL、Redis、Nginx 未重启，生产 `.env` 校验值未变化。API `/health` 和 HTTPS `/kol/login` 返回 200，生产静态 bundle 包含“标记价格约每分钟更新”。
+- 生产现有三条 Binance Copy 订阅均已启用且为 1 分钟：熬鹰资本 ID 17、重生 ID 18、意钦 ID 19。三者的 Portfolio ID、起算时间、账本、仓位和历史记录均未修改。
+- 本机 Collector 的 `CONFIG_POLL_SECONDS=60`。重启后的完整轮次为 UTC `00:08:46.222`、`00:11:55.474`、`00:12:57.528`、`00:13:59.591`；首轮还要执行全部到期的普通订阅，后续稳定两次相邻间隔分别约 62.05 秒和 62.06 秒。实际间隔为 60 秒等待加本轮约 2 秒请求耗时，并非整点 cron。
+- 三个稳定轮次中，熬鹰资本每轮成功读取 69 条、重生 43 条、意钦 11 条；普通订阅均正确显示 `not_due`。生产每轮三个仓位上传及 heartbeat 全部返回 200，本机 Outbox 和死信均为 0，launchd Collector 持续运行。
+
 ## 外部前置条件
 
 - ntfy server/topic 已配置；本轮没有额外制造测试信号，初始化信号自然触发的 1 条通知已发送成功。消息格式、UTF-8 JSON 发布、require-asset 和 exactly-once 均由后端/Collector 测试覆盖。
