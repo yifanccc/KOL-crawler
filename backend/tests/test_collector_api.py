@@ -103,7 +103,7 @@ def test_collector_config_limits_fields_and_heartbeat_replaces_latest_state() ->
     )
     assert trade_target["accountId"] == "5075281354358777856"
     assert trade_target["positionStartAt"] == "2026-08-18T16:00:00+00:00"
-    assert trade_target["intervalMinutes"] == 1
+    assert trade_target["intervalMinutes"] == 10
     regular_target = next(
         subscription for subscription in subscriptions if subscription["platform"] == "x"
     )

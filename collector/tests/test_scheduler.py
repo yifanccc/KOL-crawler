@@ -310,7 +310,7 @@ class TradeApi(Api):
                     "platform": "binance_copy",
                     "handle": "熬鹰资本",
                     "accountId": "5075281354358777856",
-                    "intervalMinutes": 1,
+                    "intervalMinutes": 10,
                     "enabled": True,
                 }
             ],
@@ -353,7 +353,7 @@ def test_scheduler_creates_trade_baseline_with_fixed_account_target(tmp_path, ca
     assert api.position_replacements[0][2][0]["status"] == "ACTIVE"
     assert api.position_replacements[0][3] is None
     assert api.position_replacements[0][4][0]["action"] == "OPEN"
-    assert scheduler.next_check[21] == now + timedelta(minutes=1)
+    assert scheduler.next_check[21] == now + timedelta(minutes=10)
     assert "status=baseline_created" in capsys.readouterr().out
 
 
@@ -561,7 +561,7 @@ def test_trade_scheduler_end_to_end_baseline_dedupes_and_marks_stale(tmp_path):
     assert store.checkpoint_for(21) == checkpoint("1")
     assert store.pending_posts() == []
 
-    assert scheduler.run_once(started_at + timedelta(minutes=1)) == [21]
+    assert scheduler.run_once(started_at + timedelta(minutes=10)) == [21]
     pending_after_change = store.pending_posts()
     assert len(pending_after_change) == 1
     assert pending_after_change[0].external_id == "5075281354358777856:2:r1"
@@ -569,13 +569,13 @@ def test_trade_scheduler_end_to_end_baseline_dedupes_and_marks_stale(tmp_path):
     assert pending_after_change[0].payload["rawPayload"]["action"] == "ADD"
     assert store.checkpoint_for(21) == checkpoint("2")
 
-    assert scheduler.run_once(started_at + timedelta(minutes=2)) == [21]
+    assert scheduler.run_once(started_at + timedelta(minutes=20)) == [21]
     assert [post.id for post in store.pending_posts()] == [
         pending_after_change[0].id
     ]
     assert store.checkpoint_for(21) == checkpoint("2")
 
-    assert scheduler.run_once(started_at + timedelta(minutes=3)) == []
+    assert scheduler.run_once(started_at + timedelta(minutes=30)) == []
     assert store.checkpoint_for(21) == checkpoint("2")
     position = store.position_for(21, "BTCUSDT", "LONG")
     assert position is not None

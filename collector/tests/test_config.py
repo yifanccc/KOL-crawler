@@ -1,7 +1,7 @@
 from collector_agent.config import CollectorSettings
 
 
-def test_config_poll_defaults_to_one_minute(monkeypatch, tmp_path):
+def test_config_poll_defaults_to_ten_minutes(monkeypatch, tmp_path):
     monkeypatch.setenv("PUBLIC_API_URL", "http://example.test/kol")
     monkeypatch.setenv("COLLECTOR_AGENT_ID", "home")
     monkeypatch.setenv("COLLECTOR_TOKEN", "token")
@@ -11,7 +11,7 @@ def test_config_poll_defaults_to_one_minute(monkeypatch, tmp_path):
 
     settings = CollectorSettings.from_env()
 
-    assert settings.config_poll_seconds == 60
+    assert settings.config_poll_seconds == 600
     assert settings.catchup_fetch_limit == 5
 
 

@@ -111,7 +111,7 @@ def test_migrations_add_binance_copy_identity_and_private_visibility() -> None:
             text(
                 "INSERT INTO subscriptions "
                 "(id, platform, platform_handle, interval_minutes) VALUES "
-                "(1, 'x', 'legacy', 10), (2, 'binance_copy', '熬鹰资本', 10)"
+                "(1, 'x', 'legacy', 10), (2, 'binance_copy', '熬鹰资本', 1)"
             )
         )
 
@@ -126,7 +126,7 @@ def test_migrations_add_binance_copy_identity_and_private_visibility() -> None:
                 "FROM subscriptions ORDER BY id"
             )
         ).all()
-    assert visibility == [(1, "public", 10), (2, "private", 1)]
+    assert visibility == [(1, "public", 10), (2, "private", 10)]
 
     with engine.begin() as connection:
         connection.execute(

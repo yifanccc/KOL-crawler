@@ -282,7 +282,7 @@ export function PositionKolDetail({
             <section className="position-detail-section" aria-label="当前持仓">
               <header className="position-section-heading">
                 <div><p className="eyebrow">Current Positions</p><h2>当前持仓</h2></div>
-                <span>{positions.length} 个仓位 · 标记价格约每分钟更新</span>
+                <span>{positions.length} 个仓位 · 标记价格每 10 分钟更新</span>
               </header>
               <div className="position-holding-list">
                 {positions.map((position) => (

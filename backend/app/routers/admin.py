@@ -94,7 +94,7 @@ class SubscriptionCreate(BaseModel):
             if "intervalMinutes" not in self.model_fields_set:
                 self.intervalMinutes = TRADE_MONITOR_INTERVAL_MINUTES
             elif self.intervalMinutes != TRADE_MONITOR_INTERVAL_MINUTES:
-                raise ValueError("private trade platforms require a 1 minute interval")
+                raise ValueError("private trade platforms require a 10 minute interval")
             prompt_fields = {
                 "prompt",
                 "systemPrompt",
@@ -481,7 +481,7 @@ def update_subscription(
         ):
             raise HTTPException(
                 status_code=422,
-                detail="private trade platforms require a 1 minute interval",
+                detail="private trade platforms require a 10 minute interval",
             )
         subscription.interval_minutes = payload.intervalMinutes
     if payload.prompt is not None:

@@ -626,7 +626,7 @@ export function buildBinanceCopyCreatePayload(
     handle: input.handle.trim(),
     accountId: input.accountId.trim(),
     positionStartAt: beijingDateTimeToIso(input.positionStartAt),
-    intervalMinutes: 1,
+    intervalMinutes: 10,
     markets: ["crypto"],
     ntfyServer: input.ntfyServer.trim(),
     ntfyTopic: input.ntfyTopic.trim(),

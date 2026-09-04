@@ -215,7 +215,7 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
                 "platform": "binance_copy",
                 "handle": "熬鹰资本",
                 "accountId": "5075281354358777856",
-                "intervalMinutes": 10,
+                "intervalMinutes": 1,
             },
         )
         invalid_prompt = client.post(
@@ -263,12 +263,12 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
         mutable_interval = client.patch(
             f"/api/admin/subscriptions/{item['id']}",
             headers=headers,
-            json={"intervalMinutes": 1},
+            json={"intervalMinutes": 10},
         )
         invalid_mutable_interval = client.patch(
             f"/api/admin/subscriptions/{item['id']}",
             headers=headers,
-            json={"intervalMinutes": 10},
+            json={"intervalMinutes": 1},
         )
         mutable_account = client.patch(
             f"/api/admin/subscriptions/{item['id']}",
@@ -296,7 +296,7 @@ def test_binance_copy_subscription_uses_fixed_account_identity_and_visibility() 
     assert item["accountId"] == "5075281354358777856"
     assert item["positionStartAt"] == "2026-08-18T16:00:00+00:00"
     assert item["visibility"] == "private"
-    assert item["intervalMinutes"] == 1
+    assert item["intervalMinutes"] == 10
     assert item["systemPrompt"] is None
     assert item["userPrompt"] is None
     assert item["outputSchema"] is None

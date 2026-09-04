@@ -335,7 +335,7 @@ export function AdminShell({
                   positionStartAt: requiresAccountId(platform)
                     ? form.positionStartAt
                     : "",
-                  intervalMinutes: requiresAccountId(platform) ? "1" : form.intervalMinutes,
+                  intervalMinutes: requiresAccountId(platform) ? "10" : form.intervalMinutes,
                   markets: requiresAccountId(platform) ? ["crypto"] : form.markets,
                 });
               }}>{configurablePlatforms(options.platforms).map((platform) => <option key={platform} value={platform}>{platformLabel(platform)}</option>)}</select></label>

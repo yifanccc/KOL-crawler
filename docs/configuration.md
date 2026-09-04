@@ -114,7 +114,7 @@ docker compose up -d --force-recreate --no-deps api
 - `COLLECTOR_AGENT_ID`：必须与公网配置一致。
 - `COLLECTOR_TOKEN`：明文高熵 token，只存在采集机。
 - `COLLECTOR_DB_PATH`：SQLite Outbox 路径，默认放在 `.runtime/`。
-- `CONFIG_POLL_SECONDS`：配置与调度循环间隔，默认 `60` 秒（1 分钟）。
+- `CONFIG_POLL_SECONDS`：配置与调度循环间隔，默认 `600` 秒（10 分钟）。
 - `INITIAL_FETCH_LIMIT`：本地 checkpoint 不存在时的初始化条数，默认 `1`。
 - `CATCHUP_FETCH_LIMIT`：已有 checkpoint 时的补抓上限，默认 `5`；不足 5 条时全部补抓，超过时只保留最新 5 条。
 - `NTFY_SERVER`、`NTFY_TOPIC`、`NTFY_TOKEN`：本机 provider 健康告警。
@@ -128,7 +128,7 @@ Binance 订阅填写个人主页最后一段 slug，例如 `https://www.binance.
 
 - `platform=binance_copy`
 - `visibility=private`
-- `intervalMinutes=1`
+- `intervalMinutes=10`
 - `accountId` 为 8 至 32 位数字，创建后不可修改，并按平台与 ID 唯一
 - 通知最低置信度默认为“低”；普通 KOL 订阅仍默认为“中”
 
@@ -140,7 +140,7 @@ Collector 停机后重启时会复用本机 SQLite checkpoint。X 与 Binance Sq
 
 新增订阅的抓取间隔默认是 10 分钟。Admin 表单与创建 API 使用同一默认值；当前默认 System prompt、User prompt 和 Output Schema 是 2026-07-13 Serenity（`aleabitoreddit`）配置的固定快照。以后单独修改 Serenity 不会自动改变新增订阅默认值。
 
-交易订阅固定为 1 分钟；API 和 Admin 都拒绝其它间隔。普通订阅仍默认 10 分钟。实际抓取间隔还会包含上轮网络请求耗时，并受 `CONFIG_POLL_SECONDS` 调度循环粒度影响，不承诺严格整点。
+交易订阅固定为 10 分钟；API 和 Admin 都拒绝其它间隔。实际抓取时间为该订阅上轮开始时间加 10 分钟，并受 `CONFIG_POLL_SECONDS` 调度循环粒度影响，不承诺严格整点。
 
 ## 哪些值本地可以不改
 
