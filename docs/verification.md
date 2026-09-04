@@ -295,7 +295,7 @@ API/Web 通过 `deploy/docker-compose.prod.yml` 在线构建，API 依赖明确�
 - 线上只重建并替换 API、Web；MySQL、Redis 持续运行且健康，Nginx 未重启，生产 `.env` 校验值未变化。API 容器 `/health` 返回 200，HTTPS `/kol/login` 返回 200，生产静态 bundle 包含“标记价格每 10 分钟更新”，API/Web 近 30 分钟日志无 ERROR、Traceback、Exception 或 Unhandled。
 - 生产三条 Binance Copy 订阅均已启用且恢复为 10 分钟：熬鹰资本 ID 17、重生 ID 18、意钦 ID 19。Portfolio ID、空仓起算时间、账本、仓位和历史记录均未修改。
 - 本机 `collector/.env` 已恢复为 `CONFIG_POLL_SECONDS=600`，运行时读取值也是 600。launchd Collector 重启后的首轮从 UTC `2026-09-04T13:26:32.939193Z` 开始，熬鹰资本、重生、意钦分别成功读取 90、75、97 条；生产对应三次仓位上传和 heartbeat 均返回 200。
-- 首轮完成后继续观察 75 秒，没有出现旧的一分钟轮次，launchd 进程持续运行；本地 Outbox 和死信均为 0。Collector 仍采用“本轮完成后等待 600 秒”的调度模型，因此实际相邻轮次间隔为 10 分钟加本轮执行耗时，不是整点 cron。X 订阅 `Jukanlosreve` 的既有 ProviderHealth 失败保持原状，与本次 Binance 间隔变更无关。
+- 首轮完成后 75 秒内没有出现旧的一分钟轮次；第二个完整轮次从 UTC `2026-09-04T13:37:29.764899Z` 开始，与上一轮相隔约 10 分 56.8 秒，三个 Binance 订阅再次分别成功读取 90、75、97 条。抓取到两条 X 新帖时 Outbox 短暂出现 2 条待上传记录，随后正常清空；最终 Outbox 和死信均为 0，launchd 进程持续运行。Collector 仍采用“本轮完成后等待 600 秒”的调度模型，因此实际相邻轮次间隔为 10 分钟加本轮执行耗时，不是整点 cron。X 订阅 `Jukanlosreve` 的既有 ProviderHealth 失败保持原状，与本次 Binance 间隔变更无关。
 
 ## 外部前置条件
 
